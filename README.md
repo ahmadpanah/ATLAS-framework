@@ -32,14 +32,12 @@ ATLAS is a Python framework for secure container migration across cloud environm
     # Linux/Mac
     python -m venv venv
     source venv/bin/activate
-    
     ```
     
 3.  Install required packages:
     
     ```
     pip install -r requirements.txt
-    
     ```
 
 ## Basic Usage Example
@@ -105,7 +103,6 @@ print("Migration History:", history)
 
 # Cleanup
 controller.cleanup()
-
 ```
 
 ## Advanced Usage Examples
@@ -135,7 +132,6 @@ class DockerMigrationController(MigrationController):
             resource_limits=container.attrs['HostConfig'].get('Resources', {}),
             network_policies=container.attrs['HostConfig'].get('NetworkMode', {})
         )
-
 ```
 
 ### Monitoring Example
@@ -152,7 +148,6 @@ print("Optimization History:", optimization_history)
 # Get encryption statistics
 encryption_stats = controller.aee.get_encryption_stats("container123")
 print("Encryption Stats:", encryption_stats)
-
 ```
 
 ### Custom Security Configuration
@@ -169,7 +164,6 @@ aee.encryption_configs[SecurityLevel.HIGH] = {
     'iterations': 200000,
     'memory_hard': True
 }
-
 ```
 
 ## Debugging
@@ -182,7 +176,6 @@ logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-
 ```
 
 ## License
