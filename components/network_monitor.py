@@ -1,268 +1,263 @@
-import numpy as np
-from typing import Dict, List, Optional
-import logging
 import time
-from threading import Thread, Lock
-from datetime import datetime, timedelta
-from ..utils.data_structures import NetworkMetrics
+import threading
+import subprocess
+import statistics
+import json
+import logging
+from typing import Dict, List, Optional
+from dataclasses import dataclass
+from enum import Enum
+import psutil
+import numpy as np
+from collections import deque
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+class NetworkState(Enum):
+    OPTIMAL = "OPTIMAL"
+    DEGRADED = "DEGRADED"
+    CRITICAL = "CRITICAL"
+    UNSTABLE = "UNSTABLE"
+    FAILED = "FAILED"
+
+@dataclass
+class NetworkMetrics:
+    bandwidth: float  # Mbps
+    latency: float   # ms
+    jitter: float    # ms
+    packet_loss: float  # percentage
+    link_quality: float  # percentage
+
 class NetworkConditionMonitor:
-    """
-    Implements the Network Condition Monitor component from the paper.
-    Continuously monitors network conditions between source and destination clouds.
-    """
-    def __init__(self):
-        self.metrics_history: List[NetworkMetrics] = []
-        self.current_metrics: Optional[NetworkMetrics] = None
-        self.monitoring_interval = 1.0  # seconds
-        self.history_window = timedelta(minutes=5)
-        self.running = False
-        self.lock = Lock()
+    def __init__(self, target_hosts: List[str], monitoring_interval: float = 1.0):
+        self.target_hosts = target_hosts
+        self.monitoring_interval = monitoring_interval
+        self.metrics_history = {host: deque(maxlen=100) for host in target_hosts}
+        self.current_state = {host: NetworkState.OPTIMAL for host in target_hosts}
+        self._stop_flag = threading.Event()
+        self.monitoring_thread = None
         
-        # Thresholds for network quality assessment
+        # Thresholds based on paper specifications
         self.thresholds = {
-            'bandwidth_min': 50.0,    # Mbps
-            'latency_max': 100.0,     # ms
-            'packet_loss_max': 0.02,  # 2%
-            'jitter_max': 20.0        # ms
-        }
-        
-        # ARIMA model parameters for time series analysis
-        self.arima_params = {
-            'p': 2,  # AR order
-            'd': 1,  # Difference order
-            'q': 2   # MA order
+            'bandwidth_min': 100,    # Mbps
+            'latency_max': 50,       # ms
+            'jitter_max': 10,        # ms
+            'packet_loss_max': 0.1,  # percentage
+            'link_quality_min': 95   # percentage
         }
 
     def start_monitoring(self):
-        """Start network monitoring in a separate thread"""
-        self.running = True
-        self.monitor_thread = Thread(target=self._monitoring_loop)
-        self.monitor_thread.daemon = True
-        self.monitor_thread.start()
-        logger.info("Network monitoring started")
+        """Start network monitoring"""
+        if self.monitoring_thread is None or not self.monitoring_thread.is_alive():
+            self._stop_flag.clear()
+            self.monitoring_thread = threading.Thread(target=self._monitor_loop)
+            self.monitoring_thread.daemon = True
+            self.monitoring_thread.start()
+            logger.info("Network monitoring started")
 
     def stop_monitoring(self):
         """Stop network monitoring"""
-        self.running = False
-        if hasattr(self, 'monitor_thread'):
-            self.monitor_thread.join()
-        logger.info("Network monitoring stopped")
+        self._stop_flag.set()
+        if self.monitoring_thread:
+            self.monitoring_thread.join()
+            logger.info("Network monitoring stopped")
 
-    def _monitoring_loop(self):
+    def _monitor_loop(self):
         """Main monitoring loop"""
-        while self.running:
-            try:
-                metrics = self._collect_metrics()
-                self._update_metrics(metrics)
-                time.sleep(self.monitoring_interval)
-            except Exception as e:
-                logger.error(f"Error in monitoring loop: {str(e)}")
-                time.sleep(self.monitoring_interval)
+        while not self._stop_flag.is_set():
+            for host in self.target_hosts:
+                try:
+                    metrics = self._collect_metrics(host)
+                    self.metrics_history[host].append(metrics)
+                    self._update_network_state(host)
+                except Exception as e:
+                    logger.error(f"Error monitoring host {host}: {e}")
+            time.sleep(self.monitoring_interval)
 
-    def _collect_metrics(self) -> NetworkMetrics:
-        """
-        Collect network metrics
-        In a real implementation, this would use actual network monitoring tools
-        """
-        # Simulated metrics collection
-        metrics = NetworkMetrics(
-            bandwidth=self._measure_bandwidth(),
-            latency=self._measure_latency(),
-            packet_loss=self._measure_packet_loss(),
-            jitter=self._measure_jitter(),
-            timestamp=datetime.now()
+    def _collect_metrics(self, host: str) -> NetworkMetrics:
+        """Collect network metrics for a target host"""
+        bandwidth = self._measure_bandwidth(host)
+        latency, jitter = self._measure_latency_jitter(host)
+        packet_loss = self._measure_packet_loss(host)
+        link_quality = self._calculate_link_quality(bandwidth, latency, packet_loss)
+
+        return NetworkMetrics(
+            bandwidth=bandwidth,
+            latency=latency,
+            jitter=jitter,
+            packet_loss=packet_loss,
+            link_quality=link_quality
         )
-        return metrics
 
-    def _update_metrics(self, metrics: NetworkMetrics):
-        """Update metrics history with thread safety"""
-        with self.lock:
-            self.current_metrics = metrics
-            self.metrics_history.append(metrics)
+    def _measure_bandwidth(self, host: str) -> float:
+        """Measure available bandwidth to target host"""
+        try:
+            # Using iperf3 for bandwidth measurement
+            cmd = f"iperf3 -c {host} -t 1 -J"
+            result = subprocess.run(cmd.split(), capture_output=True, text=True)
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                return float(data['end']['streams'][0]['receiver']['bits_per_second']) / 1e6
+        except Exception as e:
+            logger.error(f"Bandwidth measurement error: {e}")
+        
+        # Fallback to basic estimation
+        net_io = psutil.net_io_counters()
+        time.sleep(1)
+        net_io_after = psutil.net_io_counters()
+        bytes_sent = net_io_after.bytes_sent - net_io.bytes_sent
+        bytes_recv = net_io_after.bytes_recv - net_io.bytes_recv
+        return (bytes_sent + bytes_recv) * 8 / 1e6  # Convert to Mbps
+
+    def _measure_latency_jitter(self, host: str) -> tuple[float, float]:
+        """Measure network latency and jitter"""
+        latencies = []
+        try:
+            for _ in range(10):
+                cmd = f"ping -c 1 {host}"
+                result = subprocess.run(cmd.split(), capture_output=True, text=True)
+                if result.returncode == 0:
+                    time_str = result.stdout.split('time=')[-1].split()[0]
+                    latencies.append(float(time_str))
+                time.sleep(0.1)
             
-            # Remove old metrics
-            cutoff_time = datetime.now() - self.history_window
-            self.metrics_history = [
-                m for m in self.metrics_history 
-                if m.timestamp > cutoff_time
-            ]
+            if latencies:
+                avg_latency = statistics.mean(latencies)
+                jitter = statistics.stdev(latencies) if len(latencies) > 1 else 0
+                return avg_latency, jitter
+        except Exception as e:
+            logger.error(f"Latency measurement error: {e}")
+        
+        return 999.9, 999.9  # Error case
 
-    def get_current_metrics(self) -> Optional[NetworkMetrics]:
-        """Get the most recent network metrics"""
-        with self.lock:
-            return self.current_metrics
-
-    def analyze_network_quality(self) -> Dict:
-        """
-        Analyze network quality using time series analysis
-        Implements equation (7) from the paper - ARIMA model
-        """
-        with self.lock:
-            if not self.metrics_history:
-                return {
-                    "quality": "UNKNOWN",
-                    "score": 0.0,
-                    "confidence": 0.0
-                }
-
-            # Calculate quality scores for each metric
-            bandwidth_quality = self._analyze_bandwidth()
-            latency_quality = self._analyze_latency()
-            packet_loss_quality = self._analyze_packet_loss()
-            jitter_quality = self._analyze_jitter()
-
-            # Weighted average of quality scores
-            weights = {
-                'bandwidth': 0.4,
-                'latency': 0.3,
-                'packet_loss': 0.2,
-                'jitter': 0.1
-            }
-
-            overall_score = (
-                weights['bandwidth'] * bandwidth_quality +
-                weights['latency'] * latency_quality +
-                weights['packet_loss'] * packet_loss_quality +
-                weights['jitter'] * jitter_quality
-            )
-
-            # Determine quality category
-            quality = self._score_to_quality(overall_score)
-
-            return {
-                "quality": quality,
-                "score": overall_score,
-                "confidence": min(1.0, len(self.metrics_history) / 100),
-                "metrics": {
-                    "bandwidth_quality": bandwidth_quality,
-                    "latency_quality": latency_quality,
-                    "packet_loss_quality": packet_loss_quality,
-                    "jitter_quality": jitter_quality
-                }
-            }
-
-    def predict_network_conditions(self, time_horizon: int = 10) -> Dict:
-        """
-        Predict future network conditions using ARIMA model
-        time_horizon: number of intervals to predict ahead
-        """
-        with self.lock:
-            if len(self.metrics_history) < 10:
-                return {
-                    "prediction": None,
-                    "confidence": 0.0
-                }
-
-            try:
-                # Extract time series data
-                bandwidth_series = [m.bandwidth for m in self.metrics_history]
-                latency_series = [m.latency for m in self.metrics_history]
-
-                # Apply ARIMA model (simplified implementation)
-                bandwidth_pred = self._arima_predict(bandwidth_series, time_horizon)
-                latency_pred = self._arima_predict(latency_series, time_horizon)
-
-                return {
-                    "prediction": {
-                        "bandwidth": bandwidth_pred,
-                        "latency": latency_pred
-                    },
-                    "confidence": self._calculate_prediction_confidence()
-                }
-
-            except Exception as e:
-                logger.error(f"Prediction failed: {str(e)}")
-                return {
-                    "prediction": None,
-                    "confidence": 0.0
-                }
-
-    # Helper methods for network measurements
-    def _measure_bandwidth(self) -> float:
-        """Measure network bandwidth"""
-        # Simplified simulation
-        return max(0, np.random.normal(100, 10))  # Mean 100 Mbps, std 10
-
-    def _measure_latency(self) -> float:
-        """Measure network latency"""
-        return max(0, np.random.normal(50, 5))  # Mean 50 ms, std 5
-
-    def _measure_packet_loss(self) -> float:
+    def _measure_packet_loss(self, host: str) -> float:
         """Measure packet loss rate"""
-        return max(0, min(1, np.random.normal(0.01, 0.002)))  # Mean 1%, std 0.2%
-
-    def _measure_jitter(self) -> float:
-        """Measure network jitter"""
-        return max(0, np.random.normal(10, 2))  # Mean 10 ms, std 2
-
-    # Analysis helper methods
-    def _analyze_bandwidth(self) -> float:
-        """Analyze bandwidth quality"""
-        recent_bandwidth = [m.bandwidth for m in self.metrics_history[-10:]]
-        avg_bandwidth = np.mean(recent_bandwidth)
-        return min(1.0, avg_bandwidth / self.thresholds['bandwidth_min'])
-
-    def _analyze_latency(self) -> float:
-        """Analyze latency quality"""
-        recent_latency = [m.latency for m in self.metrics_history[-10:]]
-        avg_latency = np.mean(recent_latency)
-        return max(0.0, 1.0 - (avg_latency / self.thresholds['latency_max']))
-
-    def _analyze_packet_loss(self) -> float:
-        """Analyze packet loss quality"""
-        recent_loss = [m.packet_loss for m in self.metrics_history[-10:]]
-        avg_loss = np.mean(recent_loss)
-        return max(0.0, 1.0 - (avg_loss / self.thresholds['packet_loss_max']))
-
-    def _analyze_jitter(self) -> float:
-        """Analyze jitter quality"""
-        recent_jitter = [m.jitter for m in self.metrics_history[-10:]]
-        avg_jitter = np.mean(recent_jitter)
-        return max(0.0, 1.0 - (avg_jitter / self.thresholds['jitter_max']))
-
-    def _arima_predict(self, series: List[float], horizon: int) -> List[float]:
-        """
-        Simplified ARIMA prediction
-        In a real implementation, this would use a proper ARIMA model
-        """
-        # Simple moving average prediction for demonstration
-        window = min(len(series), 5)
-        last_avg = np.mean(series[-window:])
-        trend = (series[-1] - series[-window]) / window if window > 1 else 0
+        try:
+            cmd = f"ping -c 100 -i 0.1 {host}"
+            result = subprocess.run(cmd.split(), capture_output=True, text=True)
+            if result.returncode == 0:
+                transmitted = int(result.stdout.split()[0])
+                received = int(result.stdout.split()[3])
+                return ((transmitted - received) / transmitted) * 100
+        except Exception as e:
+            logger.error(f"Packet loss measurement error: {e}")
         
-        predictions = []
-        for i in range(horizon):
-            pred = last_avg + trend * (i + 1)
-            predictions.append(max(0, pred))
-            
-        return predictions
+        return 100.0  # Error case
 
-    def _calculate_prediction_confidence(self) -> float:
-        """Calculate confidence in predictions"""
-        # Based on amount of historical data and stability
-        history_factor = min(1.0, len(self.metrics_history) / 100)
+    def _calculate_link_quality(self, bandwidth: float, latency: float, packet_loss: float) -> float:
+        """Calculate overall link quality score"""
+        bandwidth_score = min(100, (bandwidth / self.thresholds['bandwidth_min']) * 100)
+        latency_score = max(0, 100 - (latency / self.thresholds['latency_max']) * 100)
+        loss_score = max(0, 100 - (packet_loss / self.thresholds['packet_loss_max']) * 100)
         
-        # Calculate stability of recent measurements
-        if len(self.metrics_history) >= 10:
-            recent_bandwidth = [m.bandwidth for m in self.metrics_history[-10:]]
-            stability_factor = 1.0 - min(1.0, np.std(recent_bandwidth) / np.mean(recent_bandwidth))
-        else:
-            stability_factor = 0.5
-            
-        return history_factor * stability_factor
+        # Weighted average of scores
+        weights = [0.4, 0.4, 0.2]  # Bandwidth, latency, and packet loss weights
+        return (bandwidth_score * weights[0] + 
+                latency_score * weights[1] + 
+                loss_score * weights[2])
 
-    @staticmethod
-    def _score_to_quality(score: float) -> str:
-        """Convert quality score to categorical rating"""
-        if score >= 0.8:
-            return "EXCELLENT"
-        elif score >= 0.6:
-            return "GOOD"
-        elif score >= 0.4:
-            return "FAIR"
+    def _update_network_state(self, host: str):
+        """Update network state based on current metrics"""
+        if not self.metrics_history[host]:
+            return
+
+        current_metrics = self.metrics_history[host][-1]
+        
+        # Calculate metrics stability
+        metrics_array = np.array([(m.bandwidth, m.latency, m.packet_loss) 
+                                for m in self.metrics_history[host]])
+        stability = np.std(metrics_array, axis=0)
+
+        # State determination logic
+        if current_metrics.link_quality >= self.thresholds['link_quality_min']:
+            new_state = NetworkState.OPTIMAL
+        elif current_metrics.bandwidth < self.thresholds['bandwidth_min']:
+            new_state = NetworkState.DEGRADED
+        elif current_metrics.packet_loss > self.thresholds['packet_loss_max']:
+            new_state = NetworkState.CRITICAL
+        elif np.any(stability > [10, 5, 0.5]):  # Threshold for bandwidth, latency, loss stability
+            new_state = NetworkState.UNSTABLE
+        elif current_metrics.link_quality < 50:
+            new_state = NetworkState.FAILED
         else:
-            return "POOR"
+            new_state = NetworkState.DEGRADED
+
+        if new_state != self.current_state[host]:
+            self.current_state[host] = new_state
+            logger.info(f"Network state changed for {host}: {new_state.value}")
+            self._handle_state_change(host, new_state)
+
+    def _handle_state_change(self, host: str, new_state: NetworkState):
+        """Handle network state changes"""
+        actions = {
+            NetworkState.OPTIMAL: self._handle_optimal_state,
+            NetworkState.DEGRADED: self._handle_degraded_state,
+            NetworkState.CRITICAL: self._handle_critical_state,
+            NetworkState.UNSTABLE: self._handle_unstable_state,
+            NetworkState.FAILED: self._handle_failed_state
+        }
+        
+        if new_state in actions:
+            actions[new_state](host)
+
+    def _handle_optimal_state(self, host: str):
+        """Handle optimal network state"""
+        logger.info(f"Network conditions optimal for {host}")
+        # Implement optimal state handling logic
+
+    def _handle_degraded_state(self, host: str):
+        """Handle degraded network state"""
+        logger.warning(f"Network conditions degraded for {host}")
+        # Implement degraded state handling logic
+
+    def _handle_critical_state(self, host: str):
+        """Handle critical network state"""
+        logger.error(f"Critical network conditions for {host}")
+        # Implement critical state handling logic
+
+    def _handle_unstable_state(self, host: str):
+        """Handle unstable network state"""
+        logger.warning(f"Unstable network conditions for {host}")
+        # Implement unstable state handling logic
+
+    def _handle_failed_state(self, host: str):
+        """Handle failed network state"""
+        logger.error(f"Network failure detected for {host}")
+        # Implement failed state handling logic
+
+    def get_current_metrics(self, host: str) -> Optional[NetworkMetrics]:
+        """Get current network metrics for a host"""
+        if host in self.metrics_history and self.metrics_history[host]:
+            return self.metrics_history[host][-1]
+        return None
+
+    def get_network_state(self, host: str) -> NetworkState:
+        """Get current network state for a host"""
+        return self.current_state.get(host, NetworkState.FAILED)
+
+    def get_metrics_history(self, host: str) -> List[NetworkMetrics]:
+        """Get metrics history for a host"""
+        return list(self.metrics_history.get(host, []))
+
+# Example usage
+if __name__ == "__main__":
+    monitor = NetworkConditionMonitor(["8.8.8.8", "1.1.1.1"])  # Example with Google and Cloudflare DNS
+    monitor.start_monitoring()
+
+    try:
+        while True:
+            for host in monitor.target_hosts:
+                metrics = monitor.get_current_metrics(host)
+                state = monitor.get_network_state(host)
+                if metrics:
+                    print(f"\nHost: {host}")
+                    print(f"State: {state.value}")
+                    print(f"Bandwidth: {metrics.bandwidth:.2f} Mbps")
+                    print(f"Latency: {metrics.latency:.2f} ms")
+                    print(f"Jitter: {metrics.jitter:.2f} ms")
+                    print(f"Packet Loss: {metrics.packet_loss:.2f}%")
+                    print(f"Link Quality: {metrics.link_quality:.2f}%")
+            time.sleep(5)
+    except KeyboardInterrupt:
+        monitor.stop_monitoring()
