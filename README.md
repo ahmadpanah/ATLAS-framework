@@ -130,9 +130,9 @@ ATLAS (Adaptive Transfer and Learning-based Secure Container Migration Framework
 
 ## Docker Deployment
 
-```
 Build and start services:
 
+```
 docker build -t ATLAS .
 ```
 
