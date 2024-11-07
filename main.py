@@ -1,253 +1,404 @@
+import asyncio
 import logging
-from typing import Dict, Optional
-import time
-from components.migration_controller import MigrationController
-from components.federated_learning import FederatedLearningModule
-from components.container_analyzer import ContainerAttributeAnalyzer
-from components.network_monitor import NetworkConditionMonitor
-from components.encryption_engine import AdaptiveEncryptionEngine
-from components.optimizer import SecurityPerformanceOptimizer
+from typing import Dict, Any
+import argparse
+from datetime import datetime
+
+from config import default_config
+from components.federated_learning import (
+    FederatedLearningModule
+)
+from components.container_analyzer import (
+    FeatureExtractor,
+    DeepLearningClassifier,
+    SecurityProfiler
+)
+from components.network_monitor import (
+    MetricsCollector,
+    PerformanceAnalyzer,
+    StatusManager
+)
+from components.encryption_engine import (
+    LinUCBAlgorithmSelector,
+    BayesianParameterOptimizer,
+    EncryptionManager
+)
+from components.security_optimizer import (
+    TradeoffAnalyzer,
+    ResourceManager,
+    PerformanceMonitor
+)
 from utils.data_structures import (
     ContainerAttributes,
-    SecurityLevel,
     MigrationRequest,
-    NetworkMetrics,
-    ContainerMetrics
+    SecurityLevel
 )
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+from utils.metrics import MetricsAggregator
+from utils.security_utils import SecurityUtils
 
 class ATLASFramework:
-    def __init__(self):
-        """Initialize ATLAS Framework with all components"""
-        logger.info("Initializing ATLAS Framework...")
+    """ATLAS: Adaptive Transfer and Learning-based Secure Container Migration Framework"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        """Initialize ATLAS framework"""
+        self.config = config
+        self.logger = self._setup_logging()
+        self._initialize_components()
         
-        # Initialize all components
-        self.controller = MigrationController()
-        self.flm = FederatedLearningModule()
-        self.caa = ContainerAttributeAnalyzer()
-        self.ncm = NetworkConditionMonitor()
-        self.aee = AdaptiveEncryptionEngine()
-        self.spo = SecurityPerformanceOptimizer()
+    def _setup_logging(self) -> logging.Logger:
+        """Setup logging configuration"""
+        logging.basicConfig(
+            level=self.config['logging']['level'],
+            format=self.config['logging']['format'],
+            filename=self.config['logging']['file']
+        )
+        return logging.getLogger('ATLAS')
 
-    def migrate_container(self, 
-                         container_id: str,
-                         source_cloud: str,
-                         destination_cloud: str,
-                         security_level: SecurityLevel,
-                         priority: int = 1) -> Dict:
-        """
-        Main method to initiate container migration
-        """
+    def _initialize_components(self):
+        """Initialize framework components"""
         try:
-            logger.info(f"Starting migration for container {container_id}")
+            # Initialize security utilities
+            self.security_utils = SecurityUtils(self.config['security'])
             
-            # Create container attributes
-            container_attrs = self._get_container_attributes(container_id)
+            # Initialize Federated Learning Module
+            self.flm = FederatedLearningModule(self.config['federated_learning'])
             
-            # Create migration request
-            request = MigrationRequest(
-                container_id=container_id,
-                source_cloud=source_cloud,
-                destination_cloud=destination_cloud,
-                priority=priority,
-                security_level=security_level
+            # Initialize Container Analysis components
+            self.feature_extractor = FeatureExtractor(
+                self.config['monitoring']
+            )
+            self.classifier = DeepLearningClassifier(
+                self.config['federated_learning']
+            )
+            self.security_profiler = SecurityProfiler(
+                self.config['security']
             )
             
-            # Initiate migration
-            result = self.controller.initiate_migration(request)
-            migration_id = result['migration_id']
+            # Initialize Network Monitor components
+            self.metrics_collector = MetricsCollector(
+                self.config['monitoring']
+            )
+            self.performance_analyzer = PerformanceAnalyzer(
+                self.config['monitoring']
+            )
+            self.status_manager = StatusManager(
+                self.config['monitoring']
+            )
             
-            logger.info(f"Migration initiated with ID: {migration_id}")
+            # Initialize Encryption Engine components
+            self.algorithm_selector = LinUCBAlgorithmSelector(
+                self.config['encryption']
+            )
+            self.parameter_optimizer = BayesianParameterOptimizer(
+                self.config['encryption']
+            )
+            self.encryption_manager = EncryptionManager(
+                self.config['encryption']
+            )
+            
+            # Initialize Security Optimizer components
+            self.tradeoff_analyzer = TradeoffAnalyzer(
+                self.config['security']
+            )
+            self.resource_manager = ResourceManager(
+                self.config['system']
+            )
+            self.performance_monitor = PerformanceMonitor(
+                self.config['monitoring']
+            )
+            
+            # Initialize metrics aggregator
+            self.metrics_aggregator = MetricsAggregator(
+                self.config['monitoring']['collection']['window_size']
+            )
+            
+            self.logger.info("All components initialized successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Component initialization failed: {str(e)}")
+            raise
+
+    async def start(self):
+        """Start ATLAS framework"""
+        try:
+            # Start monitoring components
+            self.metrics_collector.start_collection()
+            self.status_manager.start_monitoring()
+            self.performance_monitor.start_monitoring()
+            
+            # Start federated learning
+            await self.flm.start_training()
+            
+            self.logger.info("ATLAS framework started successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Framework startup failed: {str(e)}")
+            raise
+
+    async def stop(self):
+        """Stop ATLAS framework"""
+        try:
+            # Stop monitoring components
+            self.metrics_collector.stop_collection()
+            self.status_manager.stop_monitoring()
+            self.performance_monitor.stop_monitoring()
+            
+            # Stop federated learning
+            await self.flm.stop_training()
+            
+            self.logger.info("ATLAS framework stopped successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Framework shutdown failed: {str(e)}")
+            raise
+
+    async def migrate_container(self, request: MigrationRequest) -> Dict[str, Any]:
+        """
+        Perform secure container migration
+        
+        Args:
+            request: Container migration request
+            
+        Returns:
+            Dictionary containing migration results
+        """
+        try:
+            self.logger.info(f"Starting migration for container {request.container_id}")
+            
+            # 1. Extract container features
+            features = self.feature_extractor.extract_features(request.container_id)
+            
+            # 2. Classify container
+            classification_results = self.classifier.classify_container(
+                torch.tensor(features.to_vector())
+            )
+            
+            # 3. Generate security profile
+            security_profile = self.security_profiler.generate_profile(
+                request.container_id,
+                classification_results,
+                features
+            )
+            
+            # 4. Collect network metrics
+            network_metrics = self.metrics_collector.get_current_metrics()
+            
+            # 5. Analyze network performance
+            performance_analysis = self.performance_analyzer.analyze_performance(
+                self.metrics_collector.get_metrics_history(request.container_id)
+            )
+            
+            # 6. Select encryption algorithm
+            context = self._create_context(
+                security_profile,
+                network_metrics,
+                performance_analysis
+            )
+            algorithm_selection = self.algorithm_selector.select_algorithm(
+                np.array(list(context.values()))
+            )
+            
+            # 7. Optimize encryption parameters
+            optimized_params = self.parameter_optimizer.optimize_parameters(
+                algorithm_selection.algorithm.value,
+                context
+            )
+            
+            # 8. Analyze security-performance tradeoff
+            tradeoff_analysis = self.tradeoff_analyzer.analyze_tradeoff(
+                security_profile.metrics,
+                performance_analysis.metrics,
+                optimized_params.parameters
+            )
+            
+            # 9. Allocate resources
+            resource_allocation = self.resource_manager.allocate_resources(
+                self._calculate_resource_requirements(
+                    request,
+                    tradeoff_analysis
+                ),
+                request.priority
+            )
+            
+            # 10. Perform encryption
+            encrypted_data, metadata = self.encryption_manager.manage_encryption(
+                await self._get_container_data(request.container_id),
+                algorithm_selection.algorithm.value,
+                optimized_params.parameters
+            )
+            
+            # 11. Monitor performance
+            performance_metrics = self.performance_monitor.collect_metrics()
+            
+            # 12. Update models
+            self._update_models(
+                algorithm_selection,
+                optimized_params,
+                performance_metrics
+            )
+            
+            # 13. Prepare result
+            result = {
+                'migration_id': f"mig_{datetime.now().timestamp()}",
+                'container_id': request.container_id,
+                'status': 'completed',
+                'security_profile': security_profile,
+                'encryption_metadata': metadata,
+                'performance_metrics': performance_metrics,
+                'resource_allocation': resource_allocation
+            }
+            
+            self.logger.info(f"Migration completed for container {request.container_id}")
             return result
             
         except Exception as e:
-            logger.error(f"Migration initiation failed: {str(e)}")
+            self.logger.error(f"Migration failed: {str(e)}")
             raise
 
-    def monitor_migration(self, migration_id: str, interval: float = 1.0) -> Dict:
-        try:
-            while True:
-                status = self.controller.get_migration_status(migration_id)
-                
-                if not status:
-                    raise ValueError(f"No migration found with ID {migration_id}")
-                
-                logger.info(
-                    f"Migration {migration_id} - State: {status['state']}, "
-                    f"Progress: {status['progress']*100:.2f}%"
-                )
-                
-                if status['state'] in ['COMPLETED', 'FAILED']:
-                    return status
-                    
-                time.sleep(interval)
-                
-        except Exception as e:
-            logger.error(f"Migration monitoring failed: {str(e)}")
-            raise
+    def _create_context(self,
+                       security_profile: Dict[str, Any],
+                       network_metrics: Dict[str, float],
+                       performance_analysis: Dict[str, Any]) -> Dict[str, float]:
+        """Create context for algorithm selection"""
+        return {
+            'security_level': float(security_profile['risk_score']),
+            'network_quality': self._calculate_network_quality(network_metrics),
+            'performance_score': performance_analysis.get('overall_score', 0.0),
+            'resource_utilization': self._calculate_resource_utilization()
+        }
 
-    def _get_container_attributes(self, container_id: str) -> ContainerAttributes:
-        return ContainerAttributes(
-            container_id=container_id,
-            image_size=500.0,
-            layer_count=5,
-            exposed_ports=[80, 443],
-            volume_mounts=["/data"],
-            environment_variables={"ENV": "prod"},
-            resource_limits={
-                "cpu": 1.0,
-                "memory": 2.0
-            },
-            network_policies={
-                "ingress": "restricted"
-            }
+    def _calculate_network_quality(self, 
+                                 metrics: Dict[str, float]) -> float:
+        """Calculate network quality score"""
+        weights = {
+            'latency': 0.3,
+            'bandwidth': 0.3,
+            'packet_loss': 0.2,
+            'jitter': 0.2
+        }
+        
+        scores = {
+            'latency': max(0.0, 1.0 - metrics.get('latency', 0.0) / 100.0),
+            'bandwidth': min(1.0, metrics.get('bandwidth', 0.0) / 1000.0),
+            'packet_loss': max(0.0, 1.0 - metrics.get('packet_loss', 0.0) * 100.0),
+            'jitter': max(0.0, 1.0 - metrics.get('jitter', 0.0) / 10.0)
+        }
+        
+        return sum(weights[k] * scores[k] for k in weights)
+
+    def _calculate_resource_utilization(self) -> float:
+        """Calculate current resource utilization"""
+        metrics = self.metrics_collector.get_current_metrics()
+        return (
+            metrics.get('cpu_usage', 0.0) +
+            metrics.get('memory_usage', 0.0) +
+            metrics.get('disk_usage', 0.0)
+        ) / 300.0
+
+    def _calculate_resource_requirements(self,
+                                      request: MigrationRequest,
+                                      analysis: Dict[str, Any]) -> Dict[str, float]:
+        """Calculate resource requirements"""
+        base_requirements = request.requirements
+        security_overhead = analysis['security_score'] * 0.2  # 20% max overhead
+        
+        return {
+            'cpu': base_requirements.get('cpu', 0.0) * (1 + security_overhead),
+            'memory': base_requirements.get('memory', 0.0) * (1 + security_overhead),
+            'disk': base_requirements.get('disk', 0.0),
+            'network': base_requirements.get('network', 0.0) * (1 + security_overhead)
+        }
+
+    async def _get_container_data(self, container_id: str) -> bytes:
+        """Get container data for migration"""
+        # Implementation depends on container runtime
+        return b""  # Placeholder
+
+    def _update_models(self,
+                      algorithm_selection: Any,
+                      optimized_params: Any,
+                      performance_metrics: Any):
+        """Update learning models with results"""
+        # Update algorithm selector
+        self.algorithm_selector.update_model(
+            algorithm_selection.algorithm,
+            algorithm_selection.context,
+            performance_metrics.get('efficiency', 0.0)
+        )
+        
+        # Update parameter optimizer
+        self.parameter_optimizer.update_model(
+            optimized_params.parameters,
+            optimized_params.context,
+            performance_metrics.get('efficiency', 0.0)
         )
 
-def main():
-    """Main function demonstrating ATLAS framework usage"""
+async def main():
+    """Main function"""
+    parser = argparse.ArgumentParser(description='ATLAS Framework')
+    parser.add_argument('--config', type=str, help='Configuration file path')
+    args = parser.parse_args()
+    
+    # Load configuration
+    config = default_config
+    if args.config:
+        # Load custom configuration if provided
+        pass
+    
+    # Initialize framework
+    atlas = ATLASFramework(config)
+    
     try:
-        # Initialize ATLAS framework
-        atlas = ATLASFramework()
+        # Start framework
+        await atlas.start()
         
-        # Example container migration
-        container_id = "test_container_123"
-        source_cloud = "cloud-a"
-        destination_cloud = "cloud-b"
-        security_level = SecurityLevel.HIGH
-        
-        # Start migration
-        result = atlas.migrate_container(
-            container_id=container_id,
-            source_cloud=source_cloud,
-            destination_cloud=destination_cloud,
-            security_level=security_level
+        # Example migration request
+        request = MigrationRequest(
+            container_id="container123",
+            source_cloud="cloud-a",
+            destination_cloud="cloud-b",
+            priority=1,
+            security_level=SecurityLevel.HIGH,
+            attributes=ContainerAttributes(
+                container_id="container123",
+                image_size=500.0,
+                layer_count=5,
+                exposed_ports=[80, 443],
+                volume_mounts=["/data"],
+                environment_variables={"ENV": "prod"},
+                resource_limits={
+                    "cpu": 1.0,
+                    "memory": 2.0
+                },
+                network_policies={
+                    "ingress": "restricted"
+                },
+                security_level=SecurityLevel.HIGH,
+                created_at=datetime.now(),
+                updated_at=datetime.now()
+            ),
+            requirements={
+                "cpu": 1.0,
+                "memory": 2048.0,
+                "disk": 10240.0,
+                "network": 1000.0
+            },
+            timestamp=datetime.now()
         )
         
-        # Monitor migration
-        final_status = atlas.monitor_migration(result['migration_id'])
+        # Perform migration
+        result = await atlas.migrate_container(request)
+        print(f"Migration result: {result}")
         
-        # Print final status
-        logger.info(f"Migration completed with status: {final_status}")
+        # Wait for some time
+        await asyncio.sleep(60)
         
-        # Get migration history
-        history = atlas.controller.get_migration_history()
-        logger.info(f"Migration history: {history}")
-        
-        # Cleanup
-        atlas.controller.cleanup()
-        logger.info("ATLAS framework cleanup completed")
+        # Stop framework
+        await atlas.stop()
         
     except Exception as e:
-        logger.error(f"ATLAS framework error: {str(e)}")
-        raise
-
-def example_docker_integration():
-    """Example of Docker integration"""
-    try:
-        import docker
-        
-        class DockerATLASFramework(ATLASFramework):
-            def __init__(self):
-                super().__init__()
-                self.docker_client = docker.from_env()
-                
-            def _get_container_attributes(self, container_id: str) -> ContainerAttributes:
-                container = self.docker_client.containers.get(container_id)
-                config = container.attrs['Config']
-                
-                return ContainerAttributes(
-                    container_id=container_id,
-                    image_size=float(container.attrs['Size']) / (1024*1024),
-                    layer_count=len(container.attrs['RootFS']['Layers']),
-                    exposed_ports=list(config.get('ExposedPorts', {}).keys()),
-                    volume_mounts=config.get('Volumes', []),
-                    environment_variables=dict(e.split('=') for e in config.get('Env', [])),
-                    resource_limits=container.attrs['HostConfig'].get('Resources', {}),
-                    network_policies=container.attrs['HostConfig'].get('NetworkMode', {})
-                )
-        
-        # Use Docker-integrated ATLAS
-        atlas = DockerATLASFramework()
-        
-    except ImportError:
-        logger.error("Docker SDK not installed. Install with: pip install docker")
-        raise
-
-def example_kubernetes_integration():
-    """Example of Kubernetes integration"""
-    try:
-        from kubernetes import client, config
-        
-        class KubernetesATLASFramework(ATLASFramework):
-            def __init__(self):
-                super().__init__()
-                config.load_kube_config()
-                self.k8s_client = client.CoreV1Api()
-                
-            def _get_container_attributes(self, container_id: str) -> ContainerAttributes:
-                # Parse container ID to get pod and container name
-                namespace, pod_name, container_name = self._parse_container_id(container_id)
-                
-                # Get pod details
-                pod = self.k8s_client.read_namespaced_pod(
-                    name=pod_name,
-                    namespace=namespace
-                )
-                
-                # Find container
-                container = next(
-                    (c for c in pod.spec.containers if c.name == container_name),
-                    None
-                )
-                
-                if not container:
-                    raise ValueError(f"Container {container_name} not found in pod {pod_name}")
-                
-                return ContainerAttributes(
-                    container_id=container_id,
-                    image_size=0.0,
-                    layer_count=0,    
-                    exposed_ports=[p.container_port for p in container.ports or []],
-                    volume_mounts=[v.mount_path for v in container.volume_mounts or []],
-                    environment_variables={
-                        e.name: e.value for e in container.env or []
-                    },
-                    resource_limits={
-                        "cpu": float(container.resources.limits.get('cpu', 0)),
-                        "memory": float(container.resources.limits.get('memory', 0))
-                    },
-                    network_policies={} 
-                )
-                
-            def _parse_container_id(self, container_id: str) -> tuple:
-                """Parse container ID format: namespace/pod-name/container-name"""
-                parts = container_id.split('/')
-                if len(parts) != 3:
-                    raise ValueError(
-                        "Invalid container ID format. "
-                        "Expected: namespace/pod-name/container-name"
-                    )
-                return tuple(parts)
-        
-        # Use Kubernetes-integrated ATLAS
-        atlas = KubernetesATLASFramework()
-        
-    except ImportError:
-        logger.error("Kubernetes SDK not installed. Install with: pip install kubernetes")
-        raise
+        print(f"Error: {str(e)}")
+        await atlas.stop()
 
 if __name__ == "__main__":
-    # Run basic example
-    main()
-    
-    # Uncomment to run Docker example
-    # example_docker_integration()
-    
-    # Uncomment to run Kubernetes example
-    # example_kubernetes_integration()
+    asyncio.run(main())
