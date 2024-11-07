@@ -1,75 +1,256 @@
-# ATLAS: Adaptive Transfer and Learning-based Secure Container Migration Framework
+# ATLAS Framework
 
-ATLAS is a Python framework for secure container migration across cloud environments. It provides intelligent security adaptation, performance optimization, and threat monitoring during container migration.
+  
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+[![Python Version](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/downloads/)
+
+[![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
+
+[![Kubernetes](https://img.shields.io/badge/kubernetes-%23326ce5.svg?style=flat&logo=kubernetes&logoColor=white)](https://kubernetes.io/)
+
+  
+
+ATLAS (Adaptive Transfer and Learning-based Secure Container Migration Framework) is a comprehensive framework for secure container migration across cloud environments. It provides intelligent security adaptation, performance optimization, and threat monitoring during container migration.
+
+  
 
 ## Features
 
-- **Federated Learning-based Security**: Collaborative threat intelligence sharing across cloud providers
-- **Adaptive Security**: Dynamic security measures based on container sensitivity and network conditions
-- **Performance Optimization**: Balance between security requirements and performance constraints
-- **Real-time Monitoring**: Continuous network and container monitoring
-- **Secure Migration**: End-to-end encrypted container transfer
-- **Resource Optimization**: Intelligent resource allocation based on security needs
+  
 
-## Requirements
+### Core Components
 
-- Python 3.8+
-- NumPy
-- Cryptography
-- SciPy
+  
+
+-  **Federated Learning Module (FLM)**
+
+- Collaborative threat intelligence sharing
+
+- Privacy-preserving learning
+
+- Distributed model training
+
+- Policy generation
+
+  
+
+-  **Container Attribute Analyzer (CAA)**
+
+- Feature extraction
+
+- Deep learning classification
+
+- Security profiling
+
+- Real-time analysis
+
+  
+
+-  **Network Condition Monitor (NCM)**
+
+- Real-time metrics collection
+
+- Performance analysis
+
+- Status management
+
+- Network quality assessment
+
+  
+
+-  **Adaptive Encryption Engine (AEE)**
+
+- Dynamic algorithm selection
+
+- Parameter optimization
+
+- State-based encryption management
+
+- Performance monitoring
+
+  
+
+-  **Security-Performance Optimizer (SPO)**
+
+- Trade-off analysis
+
+- Resource management
+
+- Performance monitoring
+
+- Adaptive optimization
+
+  
+
+### Key Features
+
+  
+
+- Federated Learning-based Security
+
+- Adaptive Security Measures
+
+- Performance Optimization
+
+- Real-time Monitoring
+
+- Secure Migration
+
+- Resource Optimization
+
+  
+
+## System Requirements
+
+  
+
+### Software Requirements
+
+- Python 3.12+
+
+- Docker 20.10+
+
+- Kubernetes 1.21+
+
+- MongoDB 4.4+
+
+  
+
+### Hardware Recommendations
+
+- CPU: 4+ cores
+
+- RAM: 8GB+
+
+- Storage: 100GB+
+
+- Network: 1Gbps+
+
+  
 
 ## Installation
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/ahmadpanah/atlas-framework.git
-   cd atlas-framework
 
-2.  Create a virtual environment and activate it:
+ 1. Clone the repository:
 
-    
-    ```
-    # Linux/Mac
+	    git clone https://github.com/ahmadpanah/ATLAS-framework.git
+        
+	    cd ATLAS-framework
+
+
+ 2. Create and activate virtual environment:
+
+## Linux/Mac
+
     python -m venv venv
+    
     source venv/bin/activate
-    ```
-    
-3.  Install required packages:
-    
-    ```
-    pip install -r requirements.txt
-    ```
 
-## Basic Usage Example
 
-Here's a basic example of how to use the ATLAS framework:
+## Windows
+
+    python -m venv venv
+    
+    .\venv\Scripts\activate
+
+ 3. install required packages:
+
+	    pip install -r requirements.txt
+
+ 4. Configure environment variables:
+
+## Linux/Mac
+
+export ATLAS_ENV=development
+
+export ATLAS_LOG_LEVEL=INFO
+
+  
+
+## Windows
+
+set ATLAS_ENV=development
+
+set ATLAS_LOG_LEVEL=INFO
+
+# Project Structure:
+ATLAS-framework/
+├── components/
+│   ├── federated_learning/
+│   │   ├── local_trainer.py
+│   │   ├── global_aggregator.py
+│   │   └── policy_generator.py
+│   ├── container_analyzer/
+│   │   ├── feature_extractor.py
+│   │   ├── deep_learning_classifier.py
+│   │   └── security_profiler.py
+│   ├── network_monitor/
+│   │   ├── metrics_collector.py
+│   │   ├── performance_analyzer.py
+│   │   └── status_manager.py
+│   ├── encryption_engine/
+│   │   ├── algorithm_selector.py
+│   │   ├── parameter_optimizer.py
+│   │   └── encryption_manager.py
+│   └── security_optimizer/
+│       ├── tradeoff_analyzer.py
+│       ├── resource_manager.py
+│       └── performance_monitor.py
+├── config/
+│   ├── base_config.py
+│   ├── encryption_config.py
+│   ├── federated_config.py
+│   ├── monitoring_config.py
+│   ├── network_config.py
+│   ├── security_config.py
+│   └── system_config.py
+├── utils/
+│   ├── data_structures.py
+│   ├── metrics.py
+│   └── security_utils.py
+├── LICENSE
+├── README.md
+├── requirements.txt
+└── main.py
+
+## Configuration
+
+The framework uses a hierarchical configuration system. Core configurations are located in the `config/` directory:
+
+
 ```
-from atlas.components.migration_controller import MigrationController
-from atlas.utils.data_structures import (
-    MigrationRequest,
-    SecurityLevel,
-    ContainerAttributes
-)
+# Example configuration override
+from config import default_config
 
-# Initialize the controller
-controller = MigrationController()
-
-# Create container attributes
-container_attrs = ContainerAttributes(
-    container_id="container123",
-    image_size=500.0,  # MB
-    layer_count=5,
-    exposed_ports=[80, 443],
-    volume_mounts=["/data"],
-    environment_variables={"ENV": "prod"},
-    resource_limits={
-        "cpu": 1.0,
-        "memory": 2.0
-    },
-    network_policies={
-        "ingress": "restricted"
+custom_config = {
+    'security': {
+        'levels': {
+            'HIGH': {
+                'encryption': 'AES-256-GCM',
+                'key_rotation': 21600,
+                'monitoring': 'continuous'
+            }
+        }
     }
-)
+}
+
+# Merge configurations
+config = {**default_config, **custom_config}
+
+```
+
+## Usage
+
+### Basic Usage
+
+```
+from atlas import ATLASFramework
+from utils.data_structures import MigrationRequest, SecurityLevel
+
+# Initialize framework
+atlas = ATLASFramework(config)
 
 # Create migration request
 request = MigrationRequest(
@@ -80,104 +261,37 @@ request = MigrationRequest(
     security_level=SecurityLevel.HIGH
 )
 
-# Initiate migration
-result = controller.initiate_migration(request)
-migration_id = result['migration_id']
-
-# Monitor migration status
-import time
-
-while True:
-    status = controller.get_migration_status(migration_id)
-    print(f"Migration status: {status['state']}")
-    print(f"Progress: {status['progress']*100:.2f}%")
-    
-    if status['state'] in ['COMPLETED', 'FAILED']:
-        break
-    
-    time.sleep(1)
-
-# Get migration history
-history = controller.get_migration_history()
-print("Migration History:", history)
-
-# Cleanup
-controller.cleanup()
-```
-
-## Advanced Usage Examples
-
-### Docker Integration
+# Perform migration
+result = await atlas.migrate_container(request)
 
 ```
-import docker
-from atlas.components.migration_controller import MigrationController
 
-class DockerMigrationController(MigrationController):
-    def __init__(self):
-        super().__init__()
-        self.docker_client = docker.from_env()
-
-    def _get_container_attributes(self, container_id: str) -> ContainerAttributes:
-        container = self.docker_client.containers.get(container_id)
-        config = container.attrs['Config']
-        
-        return ContainerAttributes(
-            container_id=container_id,
-            image_size=float(container.attrs['Size']) / (1024*1024),
-            layer_count=len(container.attrs['RootFS']['Layers']),
-            exposed_ports=list(config.get('ExposedPorts', {}).keys()),
-            volume_mounts=config.get('Volumes', []),
-            environment_variables=dict(e.split('=') for e in config.get('Env', [])),
-            resource_limits=container.attrs['HostConfig'].get('Resources', {}),
-            network_policies=container.attrs['HostConfig'].get('NetworkMode', {})
-        )
-```
-
-### Monitoring Example
+### Advanced Usage
 
 ```
-# Get network quality
-network_quality = controller.ncm.analyze_network_quality()
-print("Network Quality:", network_quality)
+# Custom security profile
+from components.container_analyzer import SecurityProfiler
 
-# Get optimization history
-optimization_history = controller.spo.get_optimization_history("container123")
-print("Optimization History:", optimization_history)
-
-# Get encryption statistics
-encryption_stats = controller.aee.get_encryption_stats("container123")
-print("Encryption Stats:", encryption_stats)
-```
-
-### Custom Security Configuration
-
-```
-from atlas.components.encryption_engine import AdaptiveEncryptionEngine
-
-aee = AdaptiveEncryptionEngine()
-# Configure encryption parameters for different security levels
-aee.encryption_configs[SecurityLevel.HIGH] = {
-    'algorithm': 'AES',
-    'key_size': 256,
-    'mode': 'GCM',
-    'iterations': 200000,
-    'memory_hard': True
-}
-```
-
-## Debugging
-
-Enable detailed logging:
-
-```
-import logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+profiler = SecurityProfiler(config['security'])
+profile = profiler.generate_profile(
+    container_id="container123",
+    classification_results=classification,
+    features=features
 )
+
+# Network monitoring
+from components.network_monitor import MetricsCollector
+
+collector = MetricsCollector(config['monitoring'])
+collector.start_collection()
+metrics = collector.get_current_metrics()
 ```
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Contact
+
+-   Seyed Hossein Ahmadpanah - [h.ahmadpanah@iau.ac.ir](mailto:h.ahmadpanah@iau.ac.ir)
+-   Project Link: [https://github.com/ahmadpanah/ATLAS-framework](https://github.com/ahmadpanah/ATLAS-framework)
