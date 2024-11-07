@@ -175,46 +175,6 @@ set ATLAS_ENV=development
 
 set ATLAS_LOG_LEVEL=INFO
 
-# Project Structure:
-ATLAS-framework/
-├── components/
-│   ├── federated_learning/
-│   │   ├── local_trainer.py
-│   │   ├── global_aggregator.py
-│   │   └── policy_generator.py
-│   ├── container_analyzer/
-│   │   ├── feature_extractor.py
-│   │   ├── deep_learning_classifier.py
-│   │   └── security_profiler.py
-│   ├── network_monitor/
-│   │   ├── metrics_collector.py
-│   │   ├── performance_analyzer.py
-│   │   └── status_manager.py
-│   ├── encryption_engine/
-│   │   ├── algorithm_selector.py
-│   │   ├── parameter_optimizer.py
-│   │   └── encryption_manager.py
-│   └── security_optimizer/
-│       ├── tradeoff_analyzer.py
-│       ├── resource_manager.py
-│       └── performance_monitor.py
-├── config/
-│   ├── base_config.py
-│   ├── encryption_config.py
-│   ├── federated_config.py
-│   ├── monitoring_config.py
-│   ├── network_config.py
-│   ├── security_config.py
-│   └── system_config.py
-├── utils/
-│   ├── data_structures.py
-│   ├── metrics.py
-│   └── security_utils.py
-├── LICENSE
-├── README.md
-├── requirements.txt
-└── main.py
-
 ## Configuration
 
 The framework uses a hierarchical configuration system. Core configurations are located in the `config/` directory:
