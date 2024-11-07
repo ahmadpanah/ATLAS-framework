@@ -26,61 +26,61 @@ ATLAS (Adaptive Transfer and Learning-based Secure Container Migration Framework
 
 -  **Federated Learning Module (FLM)**
 
-- Collaborative threat intelligence sharing
+	- Collaborative threat intelligence sharing
 
-- Privacy-preserving learning
+	- Privacy-preserving learning
 
-- Distributed model training
+	- Distributed model training
 
-- Policy generation
+	- Policy generation
 
   
 
 -  **Container Attribute Analyzer (CAA)**
 
-- Feature extraction
+	- Feature extraction
 
-- Deep learning classification
+	- Deep learning classification
 
-- Security profiling
+	- Security profiling
 
-- Real-time analysis
+	- Real-time analysis
 
   
 
 -  **Network Condition Monitor (NCM)**
 
-- Real-time metrics collection
+	- Real-time metrics collection
 
-- Performance analysis
+	- Performance analysis
 
-- Status management
+	- Status management
 
-- Network quality assessment
+	- Network quality assessment
 
   
 
 -  **Adaptive Encryption Engine (AEE)**
 
-- Dynamic algorithm selection
+	- Dynamic algorithm selection
 
-- Parameter optimization
+	- Parameter optimization
 
-- State-based encryption management
+	- State-based encryption management
 
-- Performance monitoring
+	- Performance monitoring
 
   
 
 -  **Security-Performance Optimizer (SPO)**
 
-- Trade-off analysis
+	- Trade-off analysis
 
-- Resource management
+	- Resource management
 
-- Performance monitoring
+	- Performance monitoring
 
-- Adaptive optimization
+	- Adaptive optimization
 
   
 
