@@ -1,279 +1,286 @@
-python
-
-Copy
 # components/container_analyzer/feature_extractor.py
 
-import torch
 import numpy as np
+import torch
+import docker
 from typing import Dict, List, Any, Tuple
-from dataclasses import dataclass
 import logging
 from datetime import datetime
-import statsmodels.api as sm
-from scipy.fft import fft
-import docker
+import pandas as pd
+from sklearn.preprocessing import StandardScaler
+import networkx as nx
+from collections import OrderedDict
+import json
+import ast
+from torch import nn
+import torch.nn.functional as F
 
-@dataclass
-class ContainerFeatures:
-    """Container feature data structure"""
-    static_features: Dict[str, Any]
-    dynamic_features: Dict[str, Any]
-    timestamp: datetime
-    container_id: str
-
-class FeatureExtractor:
+class AdvancedFeatureExtractor:
+    """Advanced feature extraction for container analysis"""
+    
     def __init__(self, config: Dict[str, Any]):
-        """
-        Initialize Feature Extractor with configuration
-        
-        Args:
-            config: Configuration dictionary containing:
-                - sampling_rate: Rate for dynamic feature collection
-                - window_size: Size of monitoring window
-                - feature_dimensions: Feature vector dimensions
-        """
         self.config = config
-        self.logger = logging.getLogger(__name__)
         self.docker_client = docker.from_env()
-        self._initialize_components()
+        self.scaler = StandardScaler()
+        self.logger = logging.getLogger(__name__)
+        self._initialize_extractors()
 
-    def _initialize_components(self):
-        """Initialize feature extraction components"""
-        self.window_size = self.config.get('window_size', 100)
-        self.sampling_rate = self.config.get('sampling_rate', 1.0)
-        self.feature_buffer = []
-        
-    def extract_features(self, container_id: str) -> ContainerFeatures:
-        """
-        Extract both static and dynamic features from container
-        
-        Args:
-            container_id: Docker container ID
-            
-        Returns:
-            ContainerFeatures object containing extracted features
-        """
+    def _initialize_extractors(self):
+        """Initialize various feature extractors"""
         try:
-            # Extract static features
-            static_features = self._extract_static_features(container_id)
+            self.static_extractor = StaticFeatureExtractor(self.config)
+            self.dynamic_extractor = DynamicFeatureExtractor(self.config)
+            self.network_extractor = NetworkFeatureExtractor(self.config)
+            self.code_extractor = CodeFeatureExtractor(self.config)
             
-            # Collect dynamic features
-            dynamic_features = self._extract_dynamic_features(container_id)
+        except Exception as e:
+            self.logger.error(f"Feature extractor initialization failed: {str(e)}")
+            raise
+
+    async def extract_features(self, container_id: str) -> Dict[str, Any]:
+        """Extract comprehensive feature set from container"""
+        try:
+            # Get container info
+            container = self.docker_client.containers.get(container_id)
+            
+            # Extract features
+            static_features = await self.static_extractor.extract(container)
+            dynamic_features = await self.dynamic_extractor.extract(container)
+            network_features = await self.network_extractor.extract(container)
+            code_features = await self.code_extractor.extract(container)
             
             # Combine features
-            features = ContainerFeatures(
-                static_features=static_features,
-                dynamic_features=dynamic_features,
-                timestamp=datetime.now(),
-                container_id=container_id
-            )
+            features = {
+                'static': static_features,
+                'dynamic': dynamic_features,
+                'network': network_features,
+                'code': code_features,
+                'metadata': self._extract_metadata(container)
+            }
             
-            return features
+            # Normalize features
+            normalized_features = self._normalize_features(features)
+            
+            return normalized_features
             
         except Exception as e:
             self.logger.error(f"Feature extraction failed: {str(e)}")
             raise
 
-    def _extract_static_features(self, container_id: str) -> Dict[str, Any]:
-        """Extract static container features"""
+    def _normalize_features(self, features: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize extracted features"""
         try:
-            container = self.docker_client.containers.get(container_id)
-            config = container.attrs['Config']
+            normalized = {}
+            for category, feature_set in features.items():
+                if isinstance(feature_set, dict):
+                    normalized[category] = {
+                        k: self.scaler.fit_transform(np.array(v).reshape(-1, 1)).flatten()
+                        if isinstance(v, (list, np.ndarray)) else v
+                        for k, v in feature_set.items()
+                    }
+                else:
+                    normalized[category] = feature_set
+            return normalized
             
-            static_features = {
-                'image_features': self._analyze_image(container.image),
-                'config_features': self._parse_configuration(config),
-                'dependency_features': self._analyze_dependencies(container),
-                'permission_features': self._analyze_permissions(container),
-                'network_features': self._analyze_network_config(container)
+        except Exception as e:
+            self.logger.error(f"Feature normalization failed: {str(e)}")
+            raise
+
+class StaticFeatureExtractor:
+    """Extract static features from container"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.logger = logging.getLogger(__name__)
+
+    async def extract(self, container: Any) -> Dict[str, Any]:
+        """Extract static features"""
+        try:
+            # Image analysis
+            image_features = self._analyze_image(container.image)
+            
+            # Configuration analysis
+            config_features = self._analyze_config(container.attrs['Config'])
+            
+            # Security profile
+            security_features = self._analyze_security_profile(container)
+            
+            # Dependency analysis
+            dependency_features = self._analyze_dependencies(container)
+            
+            return {
+                'image': image_features,
+                'config': config_features,
+                'security': security_features,
+                'dependencies': dependency_features
             }
-            
-            return static_features
             
         except Exception as e:
             self.logger.error(f"Static feature extraction failed: {str(e)}")
             raise
 
-    def _extract_dynamic_features(self, container_id: str) -> Dict[str, Any]:
-        """Extract dynamic container features"""
+    def _analyze_image(self, image: Any) -> Dict[str, Any]:
+        """Analyze container image"""
+        return {
+            'size': image.attrs['Size'],
+            'layers': len(image.history()),
+            'age': (datetime.now() - 
+                   datetime.strptime(image.attrs['Created'], 
+                   '%Y-%m-%dT%H:%M:%S.%fZ')).days,
+            'os': image.attrs['Os'],
+            'architecture': image.attrs['Architecture']
+        }
+
+    def _analyze_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze container configuration"""
+        return {
+            'env_vars': len(config.get('Env', [])),
+            'exposed_ports': len(config.get('ExposedPorts', {})),
+            'volumes': len(config.get('Volumes', {})),
+            'labels': len(config.get('Labels', {})),
+            'entrypoint': bool(config.get('Entrypoint')),
+            'user': config.get('User', 'root')
+        }
+
+    def _analyze_security_profile(self, container: Any) -> Dict[str, Any]:
+        """Analyze security profile"""
+        return {
+            'privileged': container.attrs['HostConfig']['Privileged'],
+            'capabilities': len(container.attrs['HostConfig']['CapAdd'] or []),
+            'readonly_rootfs': container.attrs['HostConfig']['ReadonlyRootfs'],
+            'security_opt': len(container.attrs['HostConfig']['SecurityOpt'] or [])
+        }
+
+    def _analyze_dependencies(self, container: Any) -> Dict[str, Any]:
+        """Analyze container dependencies"""
+        # Implementation depends on container type and available metadata
+        return {}
+
+class DynamicFeatureExtractor:
+    """Extract dynamic features from container"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.window_size = config.get('window_size', 100)
+        self.logger = logging.getLogger(__name__)
+
+    async def extract(self, container: Any) -> Dict[str, Any]:
+        """Extract dynamic features"""
         try:
-            # Initialize metrics buffer
-            metrics_buffer = []
+            # Resource usage
+            resource_metrics = self._collect_resource_metrics(container)
             
-            # Collect metrics over window
-            for _ in range(self.window_size):
-                metrics = self._collect_metrics(container_id)
-                processed_metrics = self._process_metrics(metrics)
-                metrics_buffer.append(processed_metrics)
-                
-            # Process time series features
-            dynamic_features = {
-                'time_series': self._process_time_series(metrics_buffer),
-                'statistical': self._compute_statistical_features(metrics_buffer),
-                'frequency': self._compute_frequency_features(metrics_buffer)
+            # Network activity
+            network_metrics = self._collect_network_metrics(container)
+            
+            # Process activity
+            process_metrics = self._collect_process_metrics(container)
+            
+            # I/O activity
+            io_metrics = self._collect_io_metrics(container)
+            
+            # Time series analysis
+            time_series = self._analyze_time_series(
+                resource_metrics,
+                network_metrics,
+                process_metrics,
+                io_metrics
+            )
+            
+            return {
+                'resource': resource_metrics,
+                'network': network_metrics,
+                'process': process_metrics,
+                'io': io_metrics,
+                'time_series': time_series
             }
-            
-            return dynamic_features
             
         except Exception as e:
             self.logger.error(f"Dynamic feature extraction failed: {str(e)}")
             raise
 
-    def _analyze_image(self, image) -> Dict[str, Any]:
-        """Analyze container image features"""
+    def _collect_resource_metrics(self, container: Any) -> Dict[str, float]:
+        """Collect resource usage metrics"""
+        stats = container.stats(stream=False)
         return {
-            'size': image.attrs['Size'],
-            'layers': len(image.attrs['RootFS']['Layers']),
-            'created': image.attrs['Created'],
-            'architecture': image.attrs['Architecture']
+            'cpu_usage': self._calculate_cpu_percent(stats),
+            'memory_usage': self._calculate_memory_percent(stats),
+            'memory_limit': stats['memory_stats']['limit'],
+            'rx_bytes': stats['networks']['eth0']['rx_bytes'],
+            'tx_bytes': stats['networks']['eth0']['tx_bytes']
         }
 
-    def _parse_configuration(self, config: Dict) -> Dict[str, Any]:
-        """Parse container configuration"""
-        return {
-            'environment': self._process_env_vars(config.get('Env', [])),
-            'exposed_ports': list(config.get('ExposedPorts', {}).keys()),
-            'volumes': list(config.get('Volumes', {}).keys()),
-            'labels': config.get('Labels', {}),
-            'entrypoint': config.get('Entrypoint', [])
-        }
+    def _calculate_cpu_percent(self, stats: Dict[str, Any]) -> float:
+        """Calculate CPU percentage"""
+        cpu_delta = stats['cpu_stats']['cpu_usage']['total_usage'] - \
+                   stats['precpu_stats']['cpu_usage']['total_usage']
+        system_delta = stats['cpu_stats']['system_cpu_usage'] - \
+                      stats['precpu_stats']['system_cpu_usage']
+        return (cpu_delta / system_delta) * 100.0
 
-    def _analyze_dependencies(self, container) -> Dict[str, Any]:
-        """Analyze container dependencies"""
+    def _calculate_memory_percent(self, stats: Dict[str, Any]) -> float:
+        """Calculate memory percentage"""
+        return (stats['memory_stats']['usage'] / 
+                stats['memory_stats']['limit']) * 100.0
+
+class NetworkFeatureExtractor:
+    """Extract network features from container"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.logger = logging.getLogger(__name__)
+
+    async def extract(self, container: Any) -> Dict[str, Any]:
+        """Extract network features"""
         try:
-            # Extract dependency information
-            deps = self._extract_dependencies(container)
+            # Network connections
+            connections = self._analyze_connections(container)
             
-            # Build dependency graph
-            dep_graph = self._build_dependency_graph(deps)
+            # Traffic patterns
+            traffic = self._analyze_traffic(container)
+            
+            # Protocol analysis
+            protocols = self._analyze_protocols(container)
+            
+            # Network graph
+            graph = self._create_network_graph(connections)
             
             return {
-                'dependency_count': len(deps),
-                'graph_metrics': self._compute_graph_metrics(dep_graph),
-                'vulnerability_scan': self._scan_vulnerabilities(deps)
+                'connections': connections,
+                'traffic': traffic,
+                'protocols': protocols,
+                'graph_metrics': self._calculate_graph_metrics(graph)
             }
+            
         except Exception as e:
-            self.logger.error(f"Dependency analysis failed: {str(e)}")
-            return {}
+            self.logger.error(f"Network feature extraction failed: {str(e)}")
+            raise
 
-    def _analyze_permissions(self, container) -> Dict[str, Any]:
-        """Analyze container permissions"""
-        return {
-            'capabilities': container.attrs['HostConfig'].get('CapAdd', []),
-            'security_opt': container.attrs['HostConfig'].get('SecurityOpt', []),
-            'privileged': container.attrs['HostConfig'].get('Privileged', False),
-            'user': container.attrs['Config'].get('User', '')
-        }
+class CodeFeatureExtractor:
+    """Extract code-level features from container"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.logger = logging.getLogger(__name__)
 
-    def _collect_metrics(self, container_id: str) -> Dict[str, float]:
-        """Collect real-time container metrics"""
+    async def extract(self, container: Any) -> Dict[str, Any]:
+        """Extract code features"""
         try:
-            container = self.docker_client.containers.get(container_id)
-            stats = container.stats(stream=False)
+            # Static code analysis
+            code_metrics = self._analyze_code(container)
+            
+            # Dependency analysis
+            dependencies = self._analyze_dependencies(container)
+            
+            # Security patterns
+            security_patterns = self._analyze_security_patterns(container)
             
             return {
-                'cpu_usage': self._calculate_cpu_usage(stats),
-                'memory_usage': self._calculate_memory_usage(stats),
-                'network_io': self._calculate_network_io(stats),
-                'block_io': self._calculate_block_io(stats)
-            }
-        except Exception as e:
-            self.logger.error(f"Metric collection failed: {str(e)}")
-            return {}
-
-    def _process_metrics(self, metrics: Dict[str, float]) -> Dict[str, float]:
-        """Process raw metrics"""
-        try:
-            processed = {}
-            for key, value in metrics.items():
-                # Apply exponential moving average
-                if key in self.feature_buffer:
-                    alpha = self.config.get('smoothing_factor', 0.2)
-                    processed[key] = alpha * value + (1 - alpha) * self.feature_buffer[-1][key]
-                else:
-                    processed[key] = value
-                    
-            # Update buffer
-            self.feature_buffer.append(processed)
-            if len(self.feature_buffer) > self.window_size:
-                self.feature_buffer.pop(0)
-                
-            return processed
-            
-        except Exception as e:
-            self.logger.error(f"Metric processing failed: {str(e)}")
-            return metrics
-
-    def _process_time_series(self, metrics_buffer: List[Dict]) -> Dict[str, Any]:
-        """Process time series features"""
-        try:
-            # Convert to numpy arrays
-            time_series = {
-                key: np.array([m[key] for m in metrics_buffer])
-                for key in metrics_buffer[0].keys()
-            }
-            
-            # Fit ARIMA models
-            arima_features = {}
-            for key, series in time_series.items():
-                model = sm.tsa.ARIMA(series, order=(1,1,1))
-                results = model.fit()
-                arima_features[key] = {
-                    'coefficients': results.params.tolist(),
-                    'aic': results.aic
-                }
-                
-            return {
-                'arima': arima_features,
-                'trends': self._extract_trends(time_series)
+                'code_metrics': code_metrics,
+                'dependencies': dependencies,
+                'security_patterns': security_patterns
             }
             
         except Exception as e:
-            self.logger.error(f"Time series processing failed: {str(e)}")
-            return {}
-
-    def _compute_statistical_features(self, 
-                                    metrics_buffer: List[Dict]) -> Dict[str, float]:
-        """Compute statistical features"""
-        try:
-            stats = {}
-            for key in metrics_buffer[0].keys():
-                values = [m[key] for m in metrics_buffer]
-                stats[key] = {
-                    'mean': np.mean(values),
-                    'std': np.std(values),
-                    'max': np.max(values),
-                    'min': np.min(values),
-                    'percentiles': np.percentile(values, [25, 50, 75]).tolist()
-                }
-            return stats
-            
-        except Exception as e:
-            self.logger.error(f"Statistical feature computation failed: {str(e)}")
-            return {}
-
-    def _compute_frequency_features(self, 
-                                  metrics_buffer: List[Dict]) -> Dict[str, Any]:
-        """Compute frequency domain features"""
-        try:
-            freq_features = {}
-            for key in metrics_buffer[0].keys():
-                values = [m[key] for m in metrics_buffer]
-                
-                # Compute FFT
-                fft_values = fft(values)
-                frequencies = np.fft.fftfreq(len(values), d=self.sampling_rate)
-                
-                # Extract dominant frequencies
-                dominant_freq_idx = np.argsort(np.abs(fft_values))[-3:]
-                
-                freq_features[key] = {
-                    'dominant_frequencies': frequencies[dominant_freq_idx].tolist(),
-                    'frequency_magnitudes': np.abs(fft_values[dominant_freq_idx]).tolist()
-                }
-                
-            return freq_features
-            
-        except Exception as e:
-            self.logger.error(f"Frequency feature computation failed: {str(e)}")
-            return {}
+            self.logger.error(f"Code feature extraction failed: {str(e)}")
+            raise
