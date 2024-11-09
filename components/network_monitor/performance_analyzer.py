@@ -1,250 +1,213 @@
-
 import numpy as np
-from typing import Dict, List, Any, Optional
-from dataclasses import dataclass
+from typing import Dict, List, Any, Tuple
 import logging
 from datetime import datetime
-from sklearn.ensemble import IsolationForest
-from statsmodels.tsa.arima.model import ARIMA
-
-@dataclass
-class PerformanceAnalysis:
-    """Performance analysis results"""
-    status: str
-    metrics: Dict[str, float]
-    anomalies: List[Dict[str, Any]]
-    predictions: Dict[str, float]
-    timestamp: datetime
+import pandas as pd
+from scipy import stats
+import torch
+import torch.nn as nn
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
 
 class PerformanceAnalyzer:
+    """Advanced network performance analysis"""
+    
     def __init__(self, config: Dict[str, Any]):
-        """
-        Initialize Performance Analyzer
-        
-        Args:
-            config: Configuration dictionary containing:
-                - analysis_window: Window size for analysis
-                - prediction_horizon: Steps ahead to predict
-                - anomaly_threshold: Threshold for anomaly detection
-        """
         self.config = config
         self.logger = logging.getLogger(__name__)
-        self._initialize_components()
+        self.scaler = StandardScaler()
+        self._initialize_analyzers()
 
-    def _initialize_components(self):
-        """Initialize analyzer components"""
-        self.analysis_window = self.config.get('analysis_window', 100)
-        self.prediction_horizon = self.config.get('prediction_horizon', 10)
-        self.anomaly_threshold = self.config.get('anomaly_threshold', 0.95)
-        
-        # Initialize models
-        self._initialize_models()
-        
-    def _initialize_models(self):
-        """Initialize analysis models"""
-        # Anomaly detection model
-        self.anomaly_detector = IsolationForest(
-            contamination=0.1,
-            random_state=42
-        )
-        
-        # Time series models
-        self.time_series_models = {}
-
-    def analyze_performance(self, 
-                          metrics_history: List[NetworkMetrics]) -> PerformanceAnalysis:
-        """
-        Analyze network performance
-        
-        Args:
-            metrics_history: List of historical metrics
-            
-        Returns:
-            PerformanceAnalysis object containing results
-        """
+    def _initialize_analyzers(self):
+        """Initialize performance analyzers"""
         try:
-            # Prepare data
-            data = self._prepare_data(metrics_history)
+            self.latency_analyzer = LatencyAnalyzer(self.config)
+            self.bandwidth_analyzer = BandwidthAnalyzer(self.config)
+            self.quality_analyzer = QualityAnalyzer(self.config)
+            self.bottleneck_analyzer = BottleneckAnalyzer(self.config)
             
-            # Detect anomalies
-            anomalies = self._detect_anomalies(data)
+        except Exception as e:
+            self.logger.error(f"Analyzer initialization failed: {str(e)}")
+            raise
+
+    async def analyze_performance(self, 
+                                metrics: Dict[str, Any]) -> Dict[str, Any]:
+        """Perform comprehensive performance analysis"""
+        try:
+            # Latency analysis
+            latency_analysis = await self.latency_analyzer.analyze(metrics)
             
-            # Analyze trends
-            trends = self._analyze_trends(data)
+            # Bandwidth analysis
+            bandwidth_analysis = await self.bandwidth_analyzer.analyze(metrics)
             
-            # Make predictions
-            predictions = self._make_predictions(data)
+            # Quality analysis
+            quality_analysis = await self.quality_analyzer.analyze(metrics)
             
-            # Determine status
-            status = self._determine_status(anomalies, trends)
+            # Bottleneck analysis
+            bottleneck_analysis = await self.bottleneck_analyzer.analyze(metrics)
             
-            # Compute performance metrics
-            performance_metrics = self._compute_performance_metrics(data)
-            
-            # Create analysis result
-            analysis = PerformanceAnalysis(
-                status=status,
-                metrics=performance_metrics,
-                anomalies=anomalies,
-                predictions=predictions,
-                timestamp=datetime.now()
+            # Performance scoring
+            performance_score = self._calculate_performance_score(
+                latency_analysis,
+                bandwidth_analysis,
+                quality_analysis,
+                bottleneck_analysis
             )
             
-            return analysis
+            return {
+                'latency': latency_analysis,
+                'bandwidth': bandwidth_analysis,
+                'quality': quality_analysis,
+                'bottlenecks': bottleneck_analysis,
+                'score': performance_score,
+                'timestamp': datetime.now().isoformat()
+            }
             
         except Exception as e:
             self.logger.error(f"Performance analysis failed: {str(e)}")
             raise
 
-    def _prepare_data(self, 
-                     metrics_history: List[NetworkMetrics]) -> Dict[str, np.ndarray]:
-        """Prepare data for analysis"""
+    def _calculate_performance_score(self,
+                                  latency_analysis: Dict[str, Any],
+                                  bandwidth_analysis: Dict[str, Any],
+                                  quality_analysis: Dict[str, Any],
+                                  bottleneck_analysis: Dict[str, Any]) -> float:
+        """Calculate overall performance score"""
         try:
-            data = {
-                'latency': np.array([m.latency for m in metrics_history]),
-                'bandwidth': np.array([m.bandwidth for m in metrics_history]),
-                'packet_loss': np.array([m.packet_loss for m in metrics_history]),
-                'jitter': np.array([m.jitter for m in metrics_history]),
-                'throughput': np.array([m.throughput for m in metrics_history])
+            weights = {
+                'latency': 0.3,
+                'bandwidth': 0.3,
+                'quality': 0.2,
+                'bottlenecks': 0.2
             }
-            return data
+            
+            scores = {
+                'latency': self._normalize_score(
+                    latency_analysis['score']
+                ),
+                'bandwidth': self._normalize_score(
+                    bandwidth_analysis['score']
+                ),
+                'quality': self._normalize_score(
+                    quality_analysis['score']
+                ),
+                'bottlenecks': self._normalize_score(
+                    1 - bottleneck_analysis['severity']
+                )
+            }
+            
+            return sum(weights[k] * scores[k] for k in weights)
+            
         except Exception as e:
-            self.logger.error(f"Data preparation failed: {str(e)}")
+            self.logger.error(f"Performance score calculation failed: {str(e)}")
             raise
 
-    def _detect_anomalies(self, data: Dict[str, np.ndarray]) -> List[Dict[str, Any]]:
-        """Detect anomalies in metrics"""
-        anomalies = []
-        try:
-            for metric, values in data.items():
-                # Reshape for isolation forest
-                X = values.reshape(-1, 1)
-                
-                # Fit and predict
-                self.anomaly_detector.fit(X)
-                scores = self.anomaly_detector.score_samples(X)
-                
-                # Detect anomalies
-                anomaly_points = np.where(scores < -self.anomaly_threshold)[0]
-                
-                if len(anomaly_points) > 0:
-                    anomalies.append({
-                        'metric': metric,
-                        'indices': anomaly_points.tolist(),
-                        'scores': scores[anomaly_points].tolist(),
-                        'values': values[anomaly_points].tolist()
-                    })
-                    
-            return anomalies
-            
-        except Exception as e:
-            self.logger.error(f"Anomaly detection failed: {str(e)}")
-            return []
+class LatencyAnalyzer:
+    """Analyze network latency"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.logger = logging.getLogger(__name__)
 
-    def _analyze_trends(self, data: Dict[str, np.ndarray]) -> Dict[str, Dict[str, float]]:
-        """Analyze trends in metrics"""
-        trends = {}
+    async def analyze(self, metrics: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze latency metrics"""
         try:
-            for metric, values in data.items():
-                # Compute trend statistics
-                trend = {
-                    'slope': np.polyfit(range(len(values)), values, 1)[0],
-                    'mean': np.mean(values),
-                    'std': np.std(values),
-                    'min': np.min(values),
-                    'max': np.max(values),
-                    'recent_change': self._compute_recent_change(values)
-                }
-                trends[metric] = trend
-                
-            return trends
+            latency_data = metrics['basic']['latency']
+            
+            analysis = {
+                'current': self._analyze_current_latency(latency_data),
+                'historical': self._analyze_historical_latency(latency_data),
+                'patterns': self._analyze_latency_patterns(latency_data),
+                'score': self._calculate_latency_score(latency_data)
+            }
+            
+            return analysis
             
         except Exception as e:
-            self.logger.error(f"Trend analysis failed: {str(e)}")
-            return {}
+            self.logger.error(f"Latency analysis failed: {str(e)}")
+            raise
 
-    def _make_predictions(self, data: Dict[str, np.ndarray]) -> Dict[str, float]:
-        """Make predictions using time series models"""
-        predictions = {}
-        try:
-            for metric, values in data.items():
-                if metric not in self.time_series_models:
-                    # Initialize ARIMA model
-                    model = ARIMA(values, order=(1,1,1))
-                    self.time_series_models[metric] = model.fit()
-                    
-                # Make prediction
-                forecast = self.time_series_models[metric].forecast(
-                    steps=self.prediction_horizon
-                )
-                predictions[metric] = forecast.tolist()
-                
-            return predictions
-            
-        except Exception as e:
-            self.logger.error(f"Prediction failed: {str(e)}")
-            return {}
+class BandwidthAnalyzer:
+    """Analyze network bandwidth"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.logger = logging.getLogger(__name__)
 
-    def _determine_status(self,
-                         anomalies: List[Dict[str, Any]],
-                         trends: Dict[str, Dict[str, float]]) -> str:
-        """Determine network status"""
+    async def analyze(self, metrics: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze bandwidth metrics"""
         try:
-            # Count recent anomalies
-            recent_anomalies = sum(len(a['indices']) for a in anomalies)
+            bandwidth_data = metrics['basic']['bandwidth']
             
-            # Check trends
-            negative_trends = sum(
-                1 for metric in trends.values()
-                if metric['slope'] < 0
-            )
+            analysis = {
+                'current': self._analyze_current_bandwidth(bandwidth_data),
+                'historical': self._analyze_historical_bandwidth(bandwidth_data),
+                'utilization': self._analyze_bandwidth_utilization(bandwidth_data),
+                'score': self._calculate_bandwidth_score(bandwidth_data)
+            }
             
-            # Determine status
-            if recent_anomalies > self.config.get('anomaly_limit', 5):
-                return "DEGRADED"
-            elif negative_trends > len(trends) / 2:
-                return "WARNING"
-            else:
-                return "HEALTHY"
-                
+            return analysis
+            
         except Exception as e:
-            self.logger.error(f"Status determination failed: {str(e)}")
-            return "UNKNOWN"
+            self.logger.error(f"Bandwidth analysis failed: {str(e)}")
+            raise
 
-    def _compute_performance_metrics(self, 
-                                  data: Dict[str, np.ndarray]) -> Dict[str, float]:
-        """Compute aggregated performance metrics"""
-        try:
-            metrics = {}
-            for metric, values in data.items():
-                metrics[f"{metric}_mean"] = np.mean(values)
-                metrics[f"{metric}_std"] = np.std(values)
-                metrics[f"{metric}_trend"] = np.polyfit(
-                    range(len(values)), 
-                    values, 
-                    1
-                )[0]
-                
-            return metrics
-            
-        except Exception as e:
-            self.logger.error(f"Metric computation failed: {str(e)}")
-            return {}
+class QualityAnalyzer:
+    """Analyze network quality"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.logger = logging.getLogger(__name__)
 
-    def _compute_recent_change(self, values: np.ndarray) -> float:
-        """Compute recent change in values"""
+    async def analyze(self, metrics: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze network quality metrics"""
         try:
-            if len(values) < 2:
-                return 0.0
-                
-            recent_window = self.config.get('recent_window', 10)
-            recent_values = values[-recent_window:]
+            quality_data = metrics['advanced']['quality']
             
-            if len(recent_values) < 2:
-                return 0.0
-                
-            return (recent_values[-1] - recent_values[0]) / recent_values[0]
+            analysis = {
+                'stability': self._analyze_stability(quality_data),
+                'reliability': self._analyze_reliability(quality_data),
+                'performance': self._analyze_performance(quality_data),
+                'score': self._calculate_quality_score(quality_data)
+            }
+            
+            return analysis
             
         except Exception as e:
-            self.logger.error(f"Change computation failed: {str(e)}")
-            return 0.0
+            self.logger.error(f"Quality analysis failed: {str(e)}")
+            raise
+
+class BottleneckAnalyzer:
+    """Analyze network bottlenecks"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.logger = logging.getLogger(__name__)
+
+    async def analyze(self, metrics: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze network bottlenecks"""
+        try:
+            # Collect relevant metrics
+            bandwidth = metrics['basic']['bandwidth']
+            latency = metrics['basic']['latency']
+            packet_loss = metrics['basic']['packet_loss']
+            
+            # Analyze bottlenecks
+            bottlenecks = {
+                'bandwidth': self._analyze_bandwidth_bottleneck(bandwidth),
+                'latency': self._analyze_latency_bottleneck(latency),
+                'packet_loss': self._analyze_packet_loss_bottleneck(packet_loss)
+            }
+            
+            # Calculate severity
+            severity = self._calculate_bottleneck_severity(bottlenecks)
+            
+            return {
+                'bottlenecks': bottlenecks,
+                'severity': severity,
+                'recommendations': self._generate_recommendations(bottlenecks)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Bottleneck analysis failed: {str(e)}")
+            raise

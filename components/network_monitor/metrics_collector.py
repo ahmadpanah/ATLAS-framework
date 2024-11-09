@@ -1,505 +1,328 @@
-import psutil
+# components/network_monitor/metrics_collector.py
+
 import numpy as np
-from typing import Dict, List, Any, Optional
-from dataclasses import dataclass
+from typing import Dict, List, Any, Tuple
 import logging
 from datetime import datetime
-import time
-import threading
+import asyncio
+import pandas as pd
+from scipy import stats
 from collections import deque
-import subprocess
-import statistics
-import re
-import socket
-from typing import Optional, List, Tuple
-import platform
-
-@dataclass
-class NetworkMetrics:
-    """Network metrics data structure"""
-    latency: float
-    bandwidth: float
-    packet_loss: float
-    jitter: float
-    throughput: float
-    timestamp: datetime
-
-class PingResult:
-    def __init__(self, min_rtt: float, avg_rtt: float, max_rtt: float, 
-                 mdev: float, packet_loss: float):
-        self.min_rtt = min_rtt
-        self.avg_rtt = avg_rtt
-        self.max_rtt = max_rtt
-        self.mdev = mdev
-        self.packet_loss = packet_loss
+import psutil
+import aiohttp
+from prometheus_client import Counter, Gauge, Histogram
+import statsmodels.api as sm
+from sklearn.preprocessing import StandardScaler
+import torch
+import warnings
+warnings.filterwarnings('ignore')
 
 class MetricsCollector:
+    """Advanced network metrics collection and analysis"""
+    
     def __init__(self, config: Dict[str, Any]):
-        """
-        Initialize Network Metrics Collector
-        
-        Args:
-            config: Configuration dictionary containing:
-                - sampling_rate: Rate for metric collection
-                - window_size: Size of monitoring window
-                - interfaces: List of network interfaces to monitor
-        """
         self.config = config
         self.logger = logging.getLogger(__name__)
-        self._initialize_components()
-    
-    def _ping_measurement(self, interface: str) -> float:
-        """
-        Perform ping measurement using ping v3.17.1
-        
-        Args:
-            interface: Network interface to use for ping
-            
-        Returns:
-            float: Measured latency in milliseconds
-        """
+        self.window_size = config.get('window_size', 1000)
+        self.metrics_buffer = {}
+        self.scaler = StandardScaler()
+        self._initialize_metrics()
+        self._setup_prometheus_metrics()
+
+    def _initialize_metrics(self):
+        """Initialize metrics collection buffers"""
         try:
-            # Get default gateway for the interface
-            gateway = self._get_default_gateway(interface)
-            if not gateway:
-                self.logger.error(f"Could not determine gateway for interface {interface}")
-                return float('inf')
-
-            # Perform ping measurement
-            ping_result = self._execute_ping(gateway, interface)
-            if ping_result:
-                return ping_result.avg_rtt
-            return float('inf')
-
-        except Exception as e:
-            self.logger.error(f"Ping measurement failed: {str(e)}")
-            return float('inf')
-        
-    def _execute_ping(self, target: str, interface: str, 
-                     count: int = 5) -> Optional[PingResult]:
-        """
-        Execute ping command and parse results
-        
-        Args:
-            target: Target IP address or hostname
-            interface: Network interface to use
-            count: Number of ping packets to send
-            
-        Returns:
-            Optional[PingResult]: Parsed ping results or None if failed
-        """
-        try:
-            # Construct ping command based on OS
-            if platform.system().lower() == 'linux':
-                cmd = [
-                    'ping',
-                    '-c', str(count),  # Count
-                    '-I', interface,   # Interface
-                    '-i', '0.2',       # Interval
-                    '-W', '1',         # Timeout
-                    target
-                ]
-            else:  # For other OS (Windows, macOS)
-                cmd = [
-                    'ping',
-                    '-n' if platform.system().lower() == "windows" else '-c',
-                    str(count),
-                    target
-                ]
-
-            # Execute ping command
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                universal_newlines=True
-            )
-            stdout, stderr = process.communicate()
-
-            if process.returncode == 0:
-                return self._parse_ping_output(stdout)
-            else:
-                self.logger.error(f"Ping failed: {stderr}")
-                return None
-
-        except Exception as e:
-            self.logger.error(f"Ping execution failed: {str(e)}")
-            return None
-
-    def _parse_ping_output(self, output: str) -> Optional[PingResult]:
-        """
-        Parse ping command output
-        
-        Args:
-            output: String output from ping command
-            
-        Returns:
-            Optional[PingResult]: Parsed results or None if parsing failed
-        """
-        try:
-            # Extract packet loss percentage
-            loss_match = re.search(r'(\d+)% packet loss', output)
-            packet_loss = float(loss_match.group(1)) / 100 if loss_match else 1.0
-
-            # Extract RTT statistics
-            rtt_match = re.search(
-                r'rtt min/avg/max/mdev = '
-                r'([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+)',
-                output
-            )
-            
-            if rtt_match:
-                return PingResult(
-                    min_rtt=float(rtt_match.group(1)),
-                    avg_rtt=float(rtt_match.group(2)),
-                    max_rtt=float(rtt_match.group(3)),
-                    mdev=float(rtt_match.group(4)),
-                    packet_loss=packet_loss
-                )
-
-            return None
-
-        except Exception as e:
-            self.logger.error(f"Ping output parsing failed: {str(e)}")
-            return None
-
-    def _get_default_gateway(self, interface: str) -> Optional[str]:
-        """
-        Get default gateway IP for specified interface
-        
-        Args:
-            interface: Network interface name
-            
-        Returns:
-            Optional[str]: Gateway IP address or None if not found
-        """
-        try:
-            if platform.system().lower() == 'linux':
-                # Read route information from /proc/net/route
-                with open('/proc/net/route') as f:
-                    for line in f:
-                        fields = line.strip().split()
-                        if fields[0] == interface and int(fields[1], 16) == 0:
-                            # Convert hex gateway address to IP
-                            gateway = socket.inet_ntoa(
-                                bytes.fromhex(fields[2].zfill(8))[::-1]
-                            )
-                            return gateway
-            else:
-                # For other OS, implement alternative gateway detection
-                # This is a simplified example
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.connect(("8.8.8.8", 80))
-                gateway = s.getsockname()[0]
-                s.close()
-                return gateway
-
-            return None
-
-        except Exception as e:
-            self.logger.error(f"Gateway detection failed: {str(e)}")
-            return None
-
-    def _calculate_jitter(self, rtt_values: List[float]) -> float:
-        """
-        Calculate jitter from RTT measurements
-        
-        Args:
-            rtt_values: List of RTT measurements
-            
-        Returns:
-            float: Calculated jitter value
-        """
-        try:
-            if len(rtt_values) < 2:
-                return 0.0
-
-            # Calculate differences between consecutive RTT values
-            differences = [abs(rtt_values[i] - rtt_values[i-1]) 
-                         for i in range(1, len(rtt_values))]
-            
-            # Calculate mean absolute deviation
-            jitter = statistics.mean(differences)
-            return jitter
-
-        except Exception as e:
-            self.logger.error(f"Jitter calculation failed: {str(e)}")
-            return 0.0
-
-    def get_ping_statistics(self, interface: str) -> Dict[str, float]:
-        """
-        Get comprehensive ping statistics
-        
-        Args:
-            interface: Network interface name
-            
-        Returns:
-            Dict[str, float]: Dictionary containing ping statistics
-        """
-        try:
-            gateway = self._get_default_gateway(interface)
-            if not gateway:
-                return {
-                    'min_rtt': float('inf'),
-                    'avg_rtt': float('inf'),
-                    'max_rtt': float('inf'),
-                    'jitter': 0.0,
-                    'packet_loss': 1.0
-                }
-
-            result = self._execute_ping(gateway, interface, count=10)
-            if result:
-                return {
-                    'min_rtt': result.min_rtt,
-                    'avg_rtt': result.avg_rtt,
-                    'max_rtt': result.max_rtt,
-                    'jitter': result.mdev,
-                    'packet_loss': result.packet_loss
-                }
-
-            return {
-                'min_rtt': float('inf'),
-                'avg_rtt': float('inf'),
-                'max_rtt': float('inf'),
-                'jitter': 0.0,
-                'packet_loss': 1.0
+            self.metrics_buffer = {
+                'latency': deque(maxlen=self.window_size),
+                'bandwidth': deque(maxlen=self.window_size),
+                'packet_loss': deque(maxlen=self.window_size),
+                'jitter': deque(maxlen=self.window_size),
+                'throughput': deque(maxlen=self.window_size),
+                'connection_count': deque(maxlen=self.window_size),
+                'error_rate': deque(maxlen=self.window_size),
+                'retransmission_rate': deque(maxlen=self.window_size)
             }
-
+            
+            self.anomaly_detection = AnomalyDetector(self.config)
+            self.forecasting = MetricsForecaster(self.config)
+            
         except Exception as e:
-            self.logger.error(f"Failed to get ping statistics: {str(e)}")
-            return {
-                'min_rtt': float('inf'),
-                'avg_rtt': float('inf'),
-                'max_rtt': float('inf'),
-                'jitter': 0.0,
-                'packet_loss': 1.0
-            }
-        
-    def _initialize_components(self):
-        """Initialize collector components"""
-        self.sampling_rate = self.config.get('sampling_rate', 1.0)
-        self.window_size = self.config.get('window_size', 100)
-        self.interfaces = self.config.get('interfaces', ['eth0'])
-        
-        # Initialize buffers
-        self.metrics_buffer = {
-            interface: deque(maxlen=self.window_size)
-            for interface in self.interfaces
-        }
-        
-        # Initialize monitoring thread
-        self.is_running = threading.Event()
-        self.collection_thread = None
-
-    def start_collection(self):
-        """Start metrics collection"""
-        try:
-            if not self.is_running.is_set():
-                self.is_running.set()
-                self.collection_thread = threading.Thread(
-                    target=self._collection_loop
-                )
-                self.collection_thread.start()
-                self.logger.info("Metrics collection started")
-        except Exception as e:
-            self.logger.error(f"Failed to start metrics collection: {str(e)}")
+            self.logger.error(f"Metrics initialization failed: {str(e)}")
             raise
 
-    def stop_collection(self):
-        """Stop metrics collection"""
+    def _setup_prometheus_metrics(self):
+        """Setup Prometheus metrics"""
         try:
-            if self.is_running.is_set():
-                self.is_running.clear()
-                if self.collection_thread:
-                    self.collection_thread.join()
-                self.logger.info("Metrics collection stopped")
+            self.prom_metrics = {
+                'latency': Histogram(
+                    'network_latency_ms',
+                    'Network latency in milliseconds',
+                    buckets=[5, 10, 25, 50, 100, 250, 500, 1000]
+                ),
+                'bandwidth': Gauge(
+                    'network_bandwidth_mbps',
+                    'Network bandwidth in Mbps'
+                ),
+                'packet_loss': Gauge(
+                    'packet_loss_ratio',
+                    'Packet loss ratio'
+                ),
+                'errors': Counter(
+                    'network_errors_total',
+                    'Total network errors'
+                )
+            }
+            
         except Exception as e:
-            self.logger.error(f"Failed to stop metrics collection: {str(e)}")
+            self.logger.error(f"Prometheus setup failed: {str(e)}")
             raise
 
-    def _collection_loop(self):
-        """Main collection loop"""
-        while self.is_running.is_set():
-            try:
-                for interface in self.interfaces:
-                    metrics = self._collect_interface_metrics(interface)
-                    self.metrics_buffer[interface].append(metrics)
-                
-                time.sleep(1.0 / self.sampling_rate)
-                
-            except Exception as e:
-                self.logger.error(f"Metrics collection error: {str(e)}")
-                continue
-
-    def _collect_interface_metrics(self, interface: str) -> NetworkMetrics:
-        """Collect metrics for specific interface"""
+    async def collect_metrics(self) -> Dict[str, Any]:
+        """Collect comprehensive network metrics"""
         try:
-            # Collect raw metrics
-            latency = self._measure_latency(interface)
-            bandwidth = self._measure_bandwidth(interface)
-            packet_loss = self._measure_packet_loss(interface)
-            jitter = self._measure_jitter(interface)
-            throughput = self._measure_throughput(interface)
+            # Basic metrics collection
+            basic_metrics = await self._collect_basic_metrics()
             
-            # Create metrics object
-            metrics = NetworkMetrics(
-                latency=latency,
-                bandwidth=bandwidth,
-                packet_loss=packet_loss,
-                jitter=jitter,
-                throughput=throughput,
-                timestamp=datetime.now()
+            # Advanced metrics collection
+            advanced_metrics = await self._collect_advanced_metrics()
+            
+            # Statistical analysis
+            stats_analysis = self._perform_statistical_analysis(
+                basic_metrics,
+                advanced_metrics
             )
+            
+            # Update buffers
+            self._update_metrics_buffers(basic_metrics)
+            
+            # Detect anomalies
+            anomalies = await self.anomaly_detection.detect(
+                basic_metrics,
+                advanced_metrics
+            )
+            
+            # Generate forecasts
+            forecasts = await self.forecasting.forecast()
+            
+            metrics = {
+                'basic': basic_metrics,
+                'advanced': advanced_metrics,
+                'statistics': stats_analysis,
+                'anomalies': anomalies,
+                'forecasts': forecasts,
+                'timestamp': datetime.now().isoformat()
+            }
             
             return metrics
             
         except Exception as e:
-            self.logger.error(f"Interface metrics collection failed: {str(e)}")
+            self.logger.error(f"Metrics collection failed: {str(e)}")
             raise
 
-    def _measure_latency(self, interface: str) -> float:
-        """Measure network latency"""
+    async def _collect_basic_metrics(self) -> Dict[str, float]:
+        """Collect basic network metrics"""
         try:
-            # Implement latency measurement logic
-            # Could use ping or custom probe packets
-            return self._ping_measurement(interface)
+            network_stats = psutil.net_io_counters()
+            
+            metrics = {
+                'bytes_sent': network_stats.bytes_sent,
+                'bytes_recv': network_stats.bytes_recv,
+                'packets_sent': network_stats.packets_sent,
+                'packets_recv': network_stats.packets_recv,
+                'errin': network_stats.errin,
+                'errout': network_stats.errout,
+                'dropin': network_stats.dropin,
+                'dropout': network_stats.dropout
+            }
+            
+            return metrics
+            
         except Exception as e:
-            self.logger.error(f"Latency measurement failed: {str(e)}")
-            return float('inf')
+            self.logger.error(f"Basic metrics collection failed: {str(e)}")
+            raise
 
-    def _measure_bandwidth(self, interface: str) -> float:
-        """Measure network bandwidth"""
+    async def _collect_advanced_metrics(self) -> Dict[str, float]:
+        """Collect advanced network metrics"""
         try:
-            # Get interface statistics
-            stats = psutil.net_io_counters(pernic=True)[interface]
-            current_time = time.time()
+            # Network quality metrics
+            quality_metrics = await self._measure_network_quality()
             
-            # Calculate bandwidth
-            if hasattr(self, '_last_bandwidth_check'):
-                time_delta = current_time - self._last_bandwidth_check
-                bytes_delta = (stats.bytes_sent + stats.bytes_recv -
-                             self._last_bytes_total)
-                bandwidth = bytes_delta / time_delta
-            else:
-                bandwidth = 0
-                
-            # Update last check
-            self._last_bandwidth_check = current_time
-            self._last_bytes_total = stats.bytes_sent + stats.bytes_recv
+            # Connection metrics
+            conn_metrics = await self._measure_connections()
             
-            return bandwidth
+            # Protocol metrics
+            protocol_metrics = await self._measure_protocol_metrics()
+            
+            return {
+                'quality': quality_metrics,
+                'connections': conn_metrics,
+                'protocols': protocol_metrics
+            }
             
         except Exception as e:
-            self.logger.error(f"Bandwidth measurement failed: {str(e)}")
-            return 0.0
+            self.logger.error(f"Advanced metrics collection failed: {str(e)}")
+            raise
 
-    def _measure_packet_loss(self, interface: str) -> float:
-        """Measure packet loss rate"""
+    def _perform_statistical_analysis(self, 
+                                   basic_metrics: Dict[str, float],
+                                   advanced_metrics: Dict[str, float]) -> Dict[str, Any]:
+        """Perform comprehensive statistical analysis"""
         try:
-            # Get interface statistics
-            stats = psutil.net_io_counters(pernic=True)[interface]
-            current_time = time.time()
+            analysis = {}
             
-            # Calculate packet loss
-            if hasattr(self, '_last_packet_check'):
-                packets_sent_delta = (stats.packets_sent - 
-                                    self._last_packets_sent)
-                packets_recv_delta = (stats.packets_recv - 
-                                    self._last_packets_recv)
-                
-                if packets_sent_delta > 0:
-                    loss_rate = 1.0 - (packets_recv_delta / packets_sent_delta)
-                else:
-                    loss_rate = 0.0
-            else:
-                loss_rate = 0.0
-                
-            # Update last check
-            self._last_packet_check = current_time
-            self._last_packets_sent = stats.packets_sent
-            self._last_packets_recv = stats.packets_recv
+            # Basic statistics
+            for metric, values in self.metrics_buffer.items():
+                if len(values) > 0:
+                    analysis[metric] = {
+                        'mean': np.mean(values),
+                        'std': np.std(values),
+                        'median': np.median(values),
+                        'min': np.min(values),
+                        'max': np.max(values),
+                        'skewness': stats.skew(values),
+                        'kurtosis': stats.kurtosis(values),
+                        'percentiles': {
+                            '25': np.percentile(values, 25),
+                            '50': np.percentile(values, 50),
+                            '75': np.percentile(values, 75),
+                            '90': np.percentile(values, 90),
+                            '95': np.percentile(values, 95),
+                            '99': np.percentile(values, 99)
+                        }
+                    }
             
-            return loss_rate
+            # Time series analysis
+            analysis['time_series'] = self._analyze_time_series()
+            
+            # Correlation analysis
+            analysis['correlations'] = self._analyze_correlations()
+            
+            # Distribution analysis
+            analysis['distributions'] = self._analyze_distributions()
+            
+            return analysis
             
         except Exception as e:
-            self.logger.error(f"Packet loss measurement failed: {str(e)}")
-            return 0.0
+            self.logger.error(f"Statistical analysis failed: {str(e)}")
+            raise
 
-    def _measure_jitter(self, interface: str) -> float:
-        """Measure network jitter"""
+    def _analyze_time_series(self) -> Dict[str, Any]:
+        """Perform time series analysis"""
         try:
-            # Calculate jitter from latency measurements
-            if len(self.metrics_buffer[interface]) > 1:
-                latencies = [m.latency for m in self.metrics_buffer[interface]]
-                differences = np.diff(latencies)
-                jitter = np.std(differences)
-            else:
-                jitter = 0.0
-                
-            return jitter
+            analysis = {}
+            
+            for metric, values in self.metrics_buffer.items():
+                if len(values) > 1:
+                    # Convert to pandas series
+                    series = pd.Series(values)
+                    
+                    # Trend analysis
+                    decomposition = sm.tsa.seasonal_decompose(
+                        series,
+                        period=min(len(series), 30)
+                    )
+                    
+                    analysis[metric] = {
+                        'trend': decomposition.trend.dropna().tolist(),
+                        'seasonal': decomposition.seasonal.dropna().tolist(),
+                        'residual': decomposition.resid.dropna().tolist(),
+                        'stationarity': self._check_stationarity(series),
+                        'autocorrelation': self._calculate_autocorrelation(series)
+                    }
+            
+            return analysis
             
         except Exception as e:
-            self.logger.error(f"Jitter measurement failed: {str(e)}")
-            return 0.0
+            self.logger.error(f"Time series analysis failed: {str(e)}")
+            raise
 
-    def _measure_throughput(self, interface: str) -> float:
-        """Measure network throughput"""
+    def _check_stationarity(self, series: pd.Series) -> Dict[str, Any]:
+        """Check time series stationarity"""
         try:
-            # Get interface statistics
-            stats = psutil.net_io_counters(pernic=True)[interface]
-            current_time = time.time()
+            # Augmented Dickey-Fuller test
+            adf_test = sm.tsa.stattools.adfuller(series)
             
-            # Calculate throughput
-            if hasattr(self, '_last_throughput_check'):
-                time_delta = current_time - self._last_throughput_check
-                bytes_sent_delta = stats.bytes_sent - self._last_bytes_sent
-                bytes_recv_delta = stats.bytes_recv - self._last_bytes_recv
-                
-                throughput = (bytes_sent_delta + bytes_recv_delta) / time_delta
-            else:
-                throughput = 0.0
-                
-            # Update last check
-            self._last_throughput_check = current_time
-            self._last_bytes_sent = stats.bytes_sent
-            self._last_bytes_recv = stats.bytes_recv
-            
-            return throughput
+            return {
+                'adf_statistic': adf_test[0],
+                'p_value': adf_test[1],
+                'critical_values': adf_test[4],
+                'is_stationary': adf_test[1] < 0.05
+            }
             
         except Exception as e:
-            self.logger.error(f"Throughput measurement failed: {str(e)}")
-            return 0.0
+            self.logger.error(f"Stationarity check failed: {str(e)}")
+            raise
 
-    def _ping_measurement(self, interface: str) -> float:
-        """Perform ping measurement"""
+    def _calculate_autocorrelation(self, 
+                                 series: pd.Series,
+                                 nlags: int = 40) -> Dict[str, Any]:
+        """Calculate autocorrelation"""
         try:
-            # Implement ping logic here
-            # Could use subprocess to call ping command
-            # or implement custom ICMP echo request
-            return 0.0  # Placeholder
+            # ACF and PACF
+            acf = sm.tsa.stattools.acf(series, nlags=nlags)
+            pacf = sm.tsa.stattools.pacf(series, nlags=nlags)
+            
+            return {
+                'acf': acf.tolist(),
+                'pacf': pacf.tolist(),
+                'significance_level': 1.96/np.sqrt(len(series))
+            }
+            
         except Exception as e:
-            self.logger.error(f"Ping measurement failed: {str(e)}")
-            return float('inf')
+            self.logger.error(f"Autocorrelation calculation failed: {str(e)}")
+            raise
 
-    def get_current_metrics(self, interface: str) -> Optional[NetworkMetrics]:
-        """Get most recent metrics for interface"""
+    def _analyze_correlations(self) -> Dict[str, Any]:
+        """Analyze metric correlations"""
         try:
-            if self.metrics_buffer[interface]:
-                return self.metrics_buffer[interface][-1]
-            return None
+            # Convert buffers to DataFrame
+            df = pd.DataFrame({
+                k: list(v) for k, v in self.metrics_buffer.items()
+                if len(v) > 0
+            })
+            
+            # Calculate correlations
+            correlations = df.corr()
+            
+            # Calculate partial correlations
+            partial_corr = pd.DataFrame(
+                np.linalg.pinv(correlations.values),
+                index=correlations.index,
+                columns=correlations.columns
+            )
+            
+            return {
+                'pearson': correlations.to_dict(),
+                'spearman': df.corr(method='spearman').to_dict(),
+                'partial': partial_corr.to_dict()
+            }
+            
         except Exception as e:
-            self.logger.error(f"Failed to get current metrics: {str(e)}")
-            return None
+            self.logger.error(f"Correlation analysis failed: {str(e)}")
+            raise
 
-    def get_metrics_history(self, 
-                          interface: str,
-                          window: int = None) -> List[NetworkMetrics]:
-        """Get metrics history for interface"""
+    def _analyze_distributions(self) -> Dict[str, Any]:
+        """Analyze metric distributions"""
         try:
-            buffer = list(self.metrics_buffer[interface])
-            if window is not None:
-                return buffer[-window:]
-            return buffer
+            distributions = {}
+            
+            for metric, values in self.metrics_buffer.items():
+                if len(values) > 0:
+                    # Fit normal distribution
+                    norm_params = stats.norm.fit(values)
+                    
+                    # Fit other distributions
+                    distributions[metric] = {
+                        'normal': {
+                            'params': norm_params,
+                            'kstest': stats.kstest(values, 'norm', norm_params)
+                        },
+                        'histogram': np.histogram(values, bins='auto'),
+                        'kernel_density': stats.gaussian_kde(values)
+                    }
+            
+            return distributions
+            
         except Exception as e:
-            self.logger.error(f"Failed to get metrics history: {str(e)}")
-            return []
+            self.logger.error(f"Distribution analysis failed: {str(e)}")
+            raise
