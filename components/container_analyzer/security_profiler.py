@@ -1,95 +1,74 @@
-import torch
+
 import numpy as np
-from typing import Dict, List, Any
-from dataclasses import dataclass
+from typing import Dict, List, Any, Tuple
 import logging
 from datetime import datetime
-
-@dataclass
-class SecurityProfile:
-    """Security profile data structure"""
-    container_id: str
-    risk_score: float
-    security_level: str
-    vulnerabilities: List[Dict[str, Any]]
-    recommendations: List[str]
-    timestamp: datetime
-    confidence: float
+import json
+from sklearn.ensemble import RandomForestClassifier
+import torch
 
 class SecurityProfiler:
+    """Complete security profiling system for containers"""
+    
     def __init__(self, config: Dict[str, Any]):
-        """
-        Initialize Security Profiler with configuration
-        
-        Args:
-            config: Configuration dictionary containing:
-                - risk_thresholds: Risk level thresholds
-                - security_levels: Security level definitions
-                - update_frequency: Profile update frequency
-        """
         self.config = config
         self.logger = logging.getLogger(__name__)
         self._initialize_components()
 
     def _initialize_components(self):
         """Initialize profiler components"""
-        self.risk_thresholds = self.config['risk_thresholds']
-        self.security_levels = self.config['security_levels']
-        self.profile_history = {}
-        
-        # Initialize fuzzy logic system
-        self._initialize_fuzzy_system()
-
-    def generate_profile(self, 
-                        container_id: str,
-                        classification_results: Dict[str, Any],
-                        features: Dict[str, Any]) -> SecurityProfile:
-        """
-        Generate security profile for container
-        
-        Args:
-            container_id: Container identifier
-            classification_results: Results from classifier
-            features: Container features
-            
-        Returns:
-            SecurityProfile object
-        """
         try:
-            # Compute risk score
-            risk_score = self._compute_risk_score(
-                classification_results,
+            self.vulnerability_analyzer = VulnerabilityAnalyzer(self.config)
+            self.behavior_analyzer = BehaviorAnalyzer(self.config)
+            self.risk_assessor = RiskAssessor(self.config)
+            self.compliance_checker = ComplianceChecker(self.config)
+            
+        except Exception as e:
+            self.logger.error(f"Profiler initialization failed: {str(e)}")
+            raise
+
+    async def generate_profile(self, container_id: str,
+                             features: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate comprehensive security profile"""
+        try:
+            # Vulnerability analysis
+            vulnerabilities = await self.vulnerability_analyzer.analyze(
+                container_id,
                 features
             )
             
-            # Determine security level
-            security_level = self._determine_security_level(risk_score)
-            
-            # Identify vulnerabilities
-            vulnerabilities = self._identify_vulnerabilities(
-                classification_results,
+            # Behavior analysis
+            behavior_profile = await self.behavior_analyzer.analyze(
+                container_id,
                 features
             )
             
-            # Generate recommendations
-            recommendations = self._generate_recommendations(
+            # Risk assessment
+            risk_profile = await self.risk_assessor.assess(
                 vulnerabilities,
-                security_level
+                behavior_profile
             )
             
-            # Create profile
-            profile = SecurityProfile(
-                container_id=container_id,
-                risk_score=risk_score,
-                security_level=security_level,
-                vulnerabilities=vulnerabilities,
-                recommendations=recommendations,
-                timestamp=datetime.now(),
-                confidence=classification_results['confidence'].mean()
+            # Compliance check
+            compliance_status = await self.compliance_checker.check(
+                container_id,
+                features
             )
             
-            # Update history
-            self._update_profile_history(container_id, profile)
+            # Generate final profile
+            profile = {
+                'container_id': container_id,
+                'timestamp': datetime.now().isoformat(),
+                'vulnerabilities': vulnerabilities,
+                'behavior': behavior_profile,
+                'risk': risk_profile,
+                'compliance': compliance_status,
+                'recommendations': self._generate_recommendations(
+                    vulnerabilities,
+                    risk_profile,
+                    compliance_status
+                )
+            }
             
             return profile
             
@@ -97,101 +76,195 @@ class SecurityProfiler:
             self.logger.error(f"Profile generation failed: {str(e)}")
             raise
 
-    def _compute_risk_score(self,
-                           classification_results: Dict[str, Any],
-                           features: Dict[str, Any]) -> float:
-        """Compute risk score using fuzzy logic"""
-        try:
-            # Extract relevant metrics
-            threat_level = self._evaluate_threat_level(classification_results)
-            vulnerability_score = self._evaluate_vulnerabilities(features)
-            exposure_level = self._evaluate_exposure(features)
-            
-            # Apply fuzzy rules
-            risk_score = self.fuzzy_system.evaluate(
-                threat_level,
-                vulnerability_score,
-                exposure_level
-            )
-            
-            return float(risk_score)
-            
-        except Exception as e:
-            self.logger.error(f"Risk score computation failed: {str(e)}")
-            raise
-
-    def _determine_security_level(self, risk_score: float) -> str:
-        """Determine security level based on risk score"""
-        for level, threshold in self.risk_thresholds.items():
-            if risk_score <= threshold:
-                return level
-        return "CRITICAL"
-
-    def _identify_vulnerabilities(self,
-                                classification_results: Dict[str, Any],
-                                features: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Identify security vulnerabilities"""
-        vulnerabilities = []
-        
-        # Check configuration vulnerabilities
-        vulns = self._check_config_vulnerabilities(features)
-        vulnerabilities.extend(vulns)
-        
-        # Check runtime vulnerabilities
-        vulns = self._check_runtime_vulnerabilities(features)
-        vulnerabilities.extend(vulns)
-        
-        # Check network vulnerabilities
-        vulns = self._check_network_vulnerabilities(features)
-        vulnerabilities.extend(vulns)
-        
-        return vulnerabilities
-
     def _generate_recommendations(self,
-                                vulnerabilities: List[Dict[str, Any]],
-                                security_level: str) -> List[str]:
+                                vulnerabilities: Dict[str, Any],
+                                risk_profile: Dict[str, Any],
+                                compliance_status: Dict[str, Any]) -> List[str]:
         """Generate security recommendations"""
         recommendations = []
         
-        # Generate general recommendations
-        recommendations.extend(
-            self._generate_general_recommendations(security_level)
-        )
+        # Vulnerability-based recommendations
+        if vulnerabilities['high_severity_count'] > 0:
+            recommendations.append(
+                "Critical: Address high-severity vulnerabilities immediately"
+            )
         
-        # Generate vulnerability-specific recommendations
-        recommendations.extend(
-            self._generate_vulnerability_recommendations(vulnerabilities)
-        )
+        # Risk-based recommendations
+        if risk_profile['overall_risk'] > 0.7:
+            recommendations.append(
+                "High Risk: Implement additional security controls"
+            )
+        
+        # Compliance-based recommendations
+        for policy, status in compliance_status['policies'].items():
+            if not status['compliant']:
+                recommendations.append(
+                    f"Compliance: Address {policy} policy violation"
+                )
         
         return recommendations
 
-    def _initialize_fuzzy_system(self):
-        """Initialize fuzzy logic system"""
-        self.fuzzy_system = FuzzyLogicSystem(
-            input_vars=['threat', 'vulnerability', 'exposure'],
-            output_vars=['risk'],
-            rules=self.config.get('fuzzy_rules', [])
+class VulnerabilityAnalyzer:
+    """Analyze container vulnerabilities"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.logger = logging.getLogger(__name__)
+
+    async def analyze(self, container_id: str,
+                     features: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze container vulnerabilities"""
+        try:
+            # Static analysis
+            static_vulns = self._analyze_static_vulnerabilities(features)
+            
+            # Dynamic analysis
+            dynamic_vulns = self._analyze_dynamic_vulnerabilities(features)
+            
+            # Configuration analysis
+            config_vulns = self._analyze_config_vulnerabilities(features)
+            
+            return {
+                'static': static_vulns,
+                'dynamic': dynamic_vulns,
+                'config': config_vulns,
+                'high_severity_count': self._count_high_severity(
+                    static_vulns,
+                    dynamic_vulns,
+                    config_vulns
+                )
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Vulnerability analysis failed: {str(e)}")
+            raise
+
+class BehaviorAnalyzer:
+    """Analyze container behavior patterns"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.logger = logging.getLogger(__name__)
+        self.model = self._initialize_model()
+
+    def _initialize_model(self) -> RandomForestClassifier:
+        """Initialize behavior analysis model"""
+        return RandomForestClassifier(
+            n_estimators=100,
+            max_depth=10,
+            random_state=42
         )
 
-    def _update_profile_history(self, 
-                              container_id: str,
-                              profile: SecurityProfile):
-        """Update profile history"""
-        if container_id not in self.profile_history:
-            self.profile_history[container_id] = []
-        
-        self.profile_history[container_id].append(profile)
-        
-        # Maintain history size
-        max_history = self.config.get('max_history_size', 100)
-        if len(self.profile_history[container_id]) > max_history:
-            self.profile_history[container_id].pop(0)
+    async def analyze(self, container_id: str,
+                     features: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze container behavior"""
+        try:
+            # Process behavior
+            process_behavior = self._analyze_process_behavior(features)
+            
+            # Network behavior
+            network_behavior = self._analyze_network_behavior(features)
+            
+            # Resource usage patterns
+            resource_patterns = self._analyze_resource_patterns(features)
+            
+            # Anomaly detection
+            anomalies = self._detect_anomalies(
+                process_behavior,
+                network_behavior,
+                resource_patterns
+            )
+            
+            return {
+                'process': process_behavior,
+                'network': network_behavior,
+                'resources': resource_patterns,
+                'anomalies': anomalies
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Behavior analysis failed: {str(e)}")
+            raise
 
-    def get_profile_history(self, 
-                          container_id: str,
-                          limit: int = None) -> List[SecurityProfile]:
-        """Get profile history for container"""
-        history = self.profile_history.get(container_id, [])
-        if limit:
-            return history[-limit:]
-        return history
+class RiskAssessor:
+    """Assess container security risks"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.logger = logging.getLogger(__name__)
+
+    async def assess(self, vulnerabilities: Dict[str, Any],
+                    behavior: Dict[str, Any]) -> Dict[str, Any]:
+        """Assess security risks"""
+        try:
+            # Vulnerability risk
+            vuln_risk = self._assess_vulnerability_risk(vulnerabilities)
+            
+            # Behavior risk
+            behavior_risk = self._assess_behavior_risk(behavior)
+            
+            # Configuration risk
+            config_risk = self._assess_config_risk(vulnerabilities['config'])
+            
+            # Calculate overall risk
+            overall_risk = self._calculate_overall_risk(
+                vuln_risk,
+                behavior_risk,
+                config_risk
+            )
+            
+            return {
+                'vulnerability_risk': vuln_risk,
+                'behavior_risk': behavior_risk,
+                'config_risk': config_risk,
+                'overall_risk': overall_risk
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Risk assessment failed: {str(e)}")
+            raise
+
+class ComplianceChecker:
+    """Check container compliance status"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.logger = logging.getLogger(__name__)
+        self.policies = self._load_policies()
+
+    def _load_policies(self) -> Dict[str, Any]:
+        """Load compliance policies"""
+        try:
+            with open(self.config['policy_file'], 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            self.logger.error(f"Policy loading failed: {str(e)}")
+            raise
+
+    async def check(self, container_id: str,
+                   features: Dict[str, Any]) -> Dict[str, Any]:
+        """Check compliance status"""
+        try:
+            # Policy compliance
+            policy_compliance = self._check_policy_compliance(features)
+            
+            # Security standards
+            standards_compliance = self._check_standards_compliance(features)
+            
+            # Best practices
+            practices_compliance = self._check_practices_compliance(features)
+            
+            return {
+                'policies': policy_compliance,
+                'standards': standards_compliance,
+                'practices': practices_compliance,
+                'overall_compliant': self._is_overall_compliant(
+                    policy_compliance,
+                    standards_compliance,
+                    practices_compliance
+                )
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Compliance check failed: {str(e)}")
+            raise

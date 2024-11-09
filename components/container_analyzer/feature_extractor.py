@@ -1,5 +1,3 @@
-# components/container_analyzer/feature_extractor.py
-
 import numpy as np
 import torch
 import docker
