@@ -11,9 +11,6 @@ class LocalModelTrainer:
         
     def train(self, model: nn.Module, data: torch.Tensor, 
               learning_rate: float) -> Dict[str, Any]:
-        """
-        Implementation of Algorithm 1: Privacy-Preserving Local Training
-        """
         gradients = []
         
         while self.privacy_accountant.get_budget() < self.privacy_budget:
