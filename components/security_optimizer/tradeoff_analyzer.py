@@ -1,227 +1,276 @@
-
 import numpy as np
 from typing import Dict, List, Any, Tuple
-import logging
-from datetime import datetime
-from dataclasses import dataclass
+from sklearn.preprocessing import StandardScaler
 from scipy.optimize import minimize
+import logging
+from dataclasses import dataclass
+import time
 
 @dataclass
-class TradeoffAnalysis:
-    """Tradeoff analysis result"""
-    configuration: Dict[str, Any]
-    security_score: float
-    performance_score: float
-    pareto_optimal: bool
-    timestamp: datetime
+class SecurityMetrics:
+    encryption_strength: float
+    vulnerability_score: float
+    threat_level: float
+    compliance_level: float
+
+@dataclass
+class PerformanceMetrics:
+    latency: float
+    throughput: float
+    resource_usage: float
+    energy_efficiency: float
 
 class TradeoffAnalyzer:
+    """Advanced security-performance trade-off analyzer"""
+    
     def __init__(self, config: Dict[str, Any]):
-        """
-        Initialize Tradeoff Analyzer
-        
-        Args:
-            config: Configuration dictionary containing:
-                - security_weight: Weight for security objective
-                - performance_weight: Weight for performance objective
-                - constraints: System constraints
-        """
         self.config = config
         self.logger = logging.getLogger(__name__)
-        self._initialize_components()
+        self.scaler = StandardScaler()
+        self.history = []
 
-    def _initialize_components(self):
-        """Initialize analyzer components"""
-        self.security_weight = self.config.get('security_weight', 0.6)
-        self.performance_weight = self.config.get('performance_weight', 0.4)
-        self.constraints = self.config.get('constraints', {})
-        self.pareto_front = []
-        self.analysis_history = []
-
-    def analyze_tradeoff(self, 
-                        security_metrics: Dict[str, float],
-                        performance_metrics: Dict[str, float],
-                        configuration: Dict[str, Any]) -> TradeoffAnalysis:
-        """
-        Analyze security-performance tradeoff
-        
-        Args:
-            security_metrics: Security-related metrics
-            performance_metrics: Performance-related metrics
-            configuration: Current system configuration
-            
-        Returns:
-            TradeoffAnalysis object containing results
-        """
+    async def analyze_tradeoff(self, 
+                             security_metrics: SecurityMetrics,
+                             performance_metrics: PerformanceMetrics) -> Dict[str, Any]:
+        """Analyze security-performance trade-off"""
         try:
-            # Calculate scores
-            security_score = self._evaluate_security(security_metrics)
-            performance_score = self._evaluate_performance(performance_metrics)
-            
-            # Check Pareto optimality
-            is_pareto = self._check_pareto_optimality(
-                security_score,
-                performance_score
+            # Normalize metrics
+            security_vector = self._normalize_security_metrics(security_metrics)
+            performance_vector = self._normalize_performance_metrics(
+                performance_metrics
             )
             
-            # Create analysis result
-            analysis = TradeoffAnalysis(
-                configuration=configuration,
-                security_score=security_score,
-                performance_score=performance_score,
-                pareto_optimal=is_pareto,
-                timestamp=datetime.now()
+            # Calculate trade-off scores
+            security_score = self._calculate_security_score(security_vector)
+            performance_score = self._calculate_performance_score(
+                performance_vector
             )
+            
+            # Optimize trade-off
+            optimal_point = self._find_optimal_tradeoff(
+                security_vector,
+                performance_vector
+            )
+            
+            # Generate recommendations
+            recommendations = self._generate_recommendations(
+                optimal_point,
+                security_metrics,
+                performance_metrics
+            )
+            
+            analysis = {
+                'security_score': security_score,
+                'performance_score': performance_score,
+                'optimal_point': optimal_point,
+                'recommendations': recommendations,
+                'timestamp': time.time()
+            }
             
             # Update history
-            self._update_history(analysis)
+            self.history.append(analysis)
             
             return analysis
             
         except Exception as e:
-            self.logger.error(f"Tradeoff analysis failed: {str(e)}")
+            self.logger.error(f"Trade-off analysis failed: {str(e)}")
             raise
 
-    def optimize_configuration(self, 
-                             current_config: Dict[str, Any]) -> Dict[str, Any]:
-        """Optimize configuration based on tradeoff analysis"""
+    def _normalize_security_metrics(self, 
+                                  metrics: SecurityMetrics) -> np.ndarray:
+        """Normalize security metrics"""
+        return self.scaler.fit_transform(np.array([
+            metrics.encryption_strength,
+            metrics.vulnerability_score,
+            metrics.threat_level,
+            metrics.compliance_level
+        ]).reshape(1, -1))
+
+    def _normalize_performance_metrics(self, 
+                                    metrics: PerformanceMetrics) -> np.ndarray:
+        """Normalize performance metrics"""
+        return self.scaler.fit_transform(np.array([
+            metrics.latency,
+            metrics.throughput,
+            metrics.resource_usage,
+            metrics.energy_efficiency
+        ]).reshape(1, -1))
+
+    def _find_optimal_tradeoff(self,
+                             security_vector: np.ndarray,
+                             performance_vector: np.ndarray) -> Dict[str, float]:
+        """Find optimal trade-off point"""
         try:
             # Define objective function
             def objective(x):
-                config = self._vector_to_config(x)
-                security = self._evaluate_security(
-                    self._get_security_metrics(config)
-                )
-                performance = self._evaluate_performance(
-                    self._get_performance_metrics(config)
-                )
-                return -(self.security_weight * security + 
-                        self.performance_weight * performance)
+                security_weight = x[0]
+                performance_weight = 1 - security_weight
+                
+                security_score = np.sum(security_vector * security_weight)
+                performance_score = np.sum(performance_vector * performance_weight)
+                
+                return -(security_score + performance_score)
 
-            # Define constraints
-            constraints = self._get_optimization_constraints()
-            
-            # Initialize optimization
-            x0 = self._config_to_vector(current_config)
-            
-            # Perform optimization
+            # Optimize weights
             result = minimize(
                 objective,
-                x0,
-                constraints=constraints,
-                method='SLSQP'
+                x0=[0.5],
+                bounds=[(0, 1)],
+                method='L-BFGS-B'
             )
             
-            if result.success:
-                return self._vector_to_config(result.x)
-            else:
-                raise ValueError("Optimization failed")
-                
-        except Exception as e:
-            self.logger.error(f"Configuration optimization failed: {str(e)}")
-            return current_config
-
-    def _evaluate_security(self, metrics: Dict[str, float]) -> float:
-        """Evaluate security score"""
-        try:
-            # Calculate weighted security score
-            weights = {
-                'encryption_strength': 0.3,
-                'vulnerability_score': 0.3,
-                'threat_mitigation': 0.2,
-                'data_protection': 0.2
+            security_weight = result.x[0]
+            performance_weight = 1 - security_weight
+            
+            return {
+                'security_weight': security_weight,
+                'performance_weight': performance_weight,
+                'optimal_value': -result.fun
             }
             
-            score = sum(
-                weights.get(metric, 0.0) * value
-                for metric, value in metrics.items()
+        except Exception as e:
+            self.logger.error(f"Optimal trade-off calculation failed: {str(e)}")
+            raise
+
+class ResourceManager:
+    """Advanced resource management system"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.logger = logging.getLogger(__name__)
+        self.resource_limits = config.get('resource_limits', {})
+        self.allocation_history = []
+
+    async def allocate_resources(self, 
+                               requirements: Dict[str, float],
+                               priority: int) -> Dict[str, Any]:
+        """Allocate resources based on requirements"""
+        try:
+            # Check resource availability
+            available_resources = await self._check_availability()
+            
+            # Calculate optimal allocation
+            allocation = self._calculate_optimal_allocation(
+                requirements,
+                available_resources,
+                priority
             )
             
-            return float(score)
+            # Validate allocation
+            if not self._validate_allocation(allocation):
+                raise ValueError("Resource allocation validation failed")
             
-        except Exception as e:
-            self.logger.error(f"Security evaluation failed: {str(e)}")
-            return 0.0
-
-    def _evaluate_performance(self, metrics: Dict[str, float]) -> float:
-        """Evaluate performance score"""
-        try:
-            # Calculate weighted performance score
-            weights = {
-                'throughput': 0.3,
-                'latency': 0.3,
-                'resource_utilization': 0.2,
-                'efficiency': 0.2
-            }
+            # Apply allocation
+            await self._apply_allocation(allocation)
             
-            # Normalize latency (lower is better)
-            if 'latency' in metrics:
-                metrics['latency'] = 1.0 / (1.0 + metrics['latency'])
-                
-            score = sum(
-                weights.get(metric, 0.0) * value
-                for metric, value in metrics.items()
-            )
-            
-            return float(score)
-            
-        except Exception as e:
-            self.logger.error(f"Performance evaluation failed: {str(e)}")
-            return 0.0
-
-    def _check_pareto_optimality(self, 
-                               security: float,
-                               performance: float) -> bool:
-        """Check if point is Pareto optimal"""
-        try:
-            point = np.array([security, performance])
-            
-            # Check against existing Pareto front
-            for pareto_point in self.pareto_front:
-                if (pareto_point >= point).all() and \
-                   (pareto_point != point).any():
-                    return False
-                    
-            # Update Pareto front
-            self.pareto_front = [p for p in self.pareto_front
-                               if not (point >= p).all()]
-            self.pareto_front.append(point)
-            
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Pareto optimality check failed: {str(e)}")
-            return False
-
-    def _update_history(self, analysis: TradeoffAnalysis):
-        """Update analysis history"""
-        self.analysis_history.append(analysis)
-        
-        # Maintain history size
-        max_history = self.config.get('max_history_size', 1000)
-        if len(self.analysis_history) > max_history:
-            self.analysis_history.pop(0)
-
-    def get_pareto_front(self) -> List[Tuple[float, float]]:
-        """Get current Pareto front"""
-        return [(p[0], p[1]) for p in self.pareto_front]
-
-    def _config_to_vector(self, config: Dict[str, Any]) -> np.ndarray:
-        """Convert configuration to optimization vector"""
-        # Implementation depends on configuration structure
-        return np.array([])
-
-    def _vector_to_config(self, vector: np.ndarray) -> Dict[str, Any]:
-        """Convert optimization vector to configuration"""
-        # Implementation depends on configuration structure
-        return {}
-
-    def _get_optimization_constraints(self) -> List[Dict[str, Any]]:
-        """Get optimization constraints"""
-        constraints = []
-        for constraint in self.constraints:
-            constraints.append({
-                'type': 'ineq',
-                'fun': lambda x: constraint['function'](x)
+            # Update history
+            self.allocation_history.append({
+                'requirements': requirements,
+                'allocation': allocation,
+                'priority': priority,
+                'timestamp': time.time()
             })
-        return constraints
+            
+            return allocation
+            
+        except Exception as e:
+            self.logger.error(f"Resource allocation failed: {str(e)}")
+            raise
+
+    async def _check_availability(self) -> Dict[str, float]:
+        """Check resource availability"""
+        try:
+            # Get current resource usage
+            cpu_usage = psutil.cpu_percent(interval=1)
+            memory_usage = psutil.virtual_memory().percent
+            disk_usage = psutil.disk_usage('/').percent
+            
+            return {
+                'cpu': 100 - cpu_usage,
+                'memory': 100 - memory_usage,
+                'disk': 100 - disk_usage
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Resource availability check failed: {str(e)}")
+            raise
+
+class PerformanceMonitor:
+    """Advanced performance monitoring system"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.logger = logging.getLogger(__name__)
+        self.metrics_history = []
+        self.thresholds = config.get('thresholds', {})
+
+    async def monitor_performance(self) -> Dict[str, Any]:
+        """Monitor system performance"""
+        try:
+            # Collect metrics
+            metrics = await self._collect_metrics()
+            
+            # Analyze performance
+            analysis = self._analyze_performance(metrics)
+            
+            # Check thresholds
+            alerts = self._check_thresholds(metrics)
+            
+            # Generate report
+            report = {
+                'metrics': metrics,
+                'analysis': analysis,
+                'alerts': alerts,
+                'timestamp': time.time()
+            }
+            
+            # Update history
+            self.metrics_history.append(report)
+            
+            return report
+            
+        except Exception as e:
+            self.logger.error(f"Performance monitoring failed: {str(e)}")
+            raise
+
+    async def _collect_metrics(self) -> Dict[str, float]:
+        """Collect performance metrics"""
+        try:
+            return {
+                'cpu_usage': psutil.cpu_percent(interval=1),
+                'memory_usage': psutil.virtual_memory().percent,
+                'disk_usage': psutil.disk_usage('/').percent,
+                'network_io': psutil.net_io_counters(),
+                'system_load': os.getloadavg()
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Metrics collection failed: {str(e)}")
+            raise
+
+    def _analyze_performance(self, metrics: Dict[str, float]) -> Dict[str, Any]:
+        """Analyze performance metrics"""
+        try:
+            # Calculate basic statistics
+            stats = {
+                metric: {
+                    'mean': np.mean(history),
+                    'std': np.std(history),
+                    'min': np.min(history),
+                    'max': np.max(history)
+                }
+                for metric, history in self.metrics_history[-100:]
+            }
+            
+            # Detect trends
+            trends = self._detect_trends(metrics)
+            
+            return {
+                'statistics': stats,
+                'trends': trends,
+                'status': self._determine_status(metrics, stats)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Performance analysis failed: {str(e)}")
+            raise
